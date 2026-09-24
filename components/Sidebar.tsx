@@ -25,7 +25,44 @@ export default function Sidebar() {
       ? [...links, { href: "/admin", label: "Administration", icon: Shield }]
       : links;
 
+  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+
   return (
+    <>
+    <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 px-4 pb-2 pt-3 backdrop-blur md:hidden">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+            <Video size={16} />
+          </div>
+          <span className="font-bold tracking-tight text-slate-900">CRMASTER</span>
+        </div>
+        <button
+          onClick={handleLogout}
+          aria-label="Déconnexion"
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+        >
+          <LogOut size={18} />
+        </button>
+      </div>
+      <nav className="-mx-1 mt-2 flex gap-1 overflow-x-auto">
+        {allLinks.map((link) => {
+          const Icon = link.icon;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                isActive(link.href) ? "bg-brand-50 text-brand-700" : "text-slate-600"
+              }`}
+            >
+              <Icon size={15} />
+              {link.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </header>
     <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white/80 px-4 py-8 backdrop-blur md:flex">
       <div className="mb-10 flex items-center gap-2.5 px-2">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 text-white shadow-sm">
@@ -35,8 +72,7 @@ export default function Sidebar() {
       </div>
       <nav className="space-y-1">
         {allLinks.map((link) => {
-          const active =
-            link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+          const active = isActive(link.href);
           const Icon = link.icon;
           return (
             <Link
@@ -72,5 +108,6 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }

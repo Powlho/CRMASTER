@@ -31,6 +31,7 @@ export interface Meeting {
   notes: string;
   transcriptionProfile: string;
   reportFormat: string;
+  speakersExpected?: number;
   status: MeetingStatus;
   transcriptionStatus: TranscriptionStatus;
   notionStatus: NotionStatus;
@@ -54,4 +55,5 @@ export type NewMeetingInput = Pick<
   | "notes"
   | "transcriptionProfile"
   | "reportFormat"
+  | "speakersExpected"
 >;

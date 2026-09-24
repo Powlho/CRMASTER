@@ -100,7 +100,12 @@ server {
     listen 80;
     server_name ${DOMAIN:-_};
 
+    # Enregistrements audio : Nginx refuse par défaut tout envoi > 1 Mo (~1 min d'audio).
+    client_max_body_size 500M;
+
     location / {
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;

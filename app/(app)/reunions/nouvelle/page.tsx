@@ -20,6 +20,7 @@ export default function NewMeetingPage() {
   const [notes, setNotes] = useState("");
   const [transcriptionProfile, setTranscriptionProfile] = useState("none");
   const [reportFormat, setReportFormat] = useState("brut");
+  const [speakersExpected, setSpeakersExpected] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,6 +34,7 @@ export default function NewMeetingPage() {
       notes,
       transcriptionProfile,
       reportFormat,
+      speakersExpected: speakersExpected ? Number(speakersExpected) : undefined,
     });
     router.push(`/reunions/${meeting.id}`);
   }
@@ -112,6 +114,25 @@ export default function NewMeetingPage() {
             placeholder="Ex : Marie Dupont, Jean Martin"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Nombre de personnes qui vont parler{" "}
+            <span className="font-normal text-slate-400">(optionnel, vous inclus)</span>
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            value={speakersExpected}
+            onChange={(e) => setSpeakersExpected(e.target.value)}
+            placeholder="Ex : 3"
+            className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            Si vous le connaissez, l&apos;identification des intervenants est plus fiable.
+          </p>
         </div>
 
         <div>

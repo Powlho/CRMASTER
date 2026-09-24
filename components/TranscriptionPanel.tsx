@@ -73,6 +73,9 @@ export default function TranscriptionPanel({
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
     formData.append("profile", meeting.transcriptionProfile || "none");
+    if (meeting.speakersExpected) {
+      formData.append("speakersExpected", String(meeting.speakersExpected));
+    }
 
     onUpdate({ transcriptionStatus: "en_cours" });
     try {

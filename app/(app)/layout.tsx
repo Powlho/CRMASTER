@@ -8,9 +8,9 @@ export default function AppLayout({
 }) {
   return (
     <MeetingsProvider>
-      <div className="flex min-h-screen">
+      <div className="flex min-h-screen flex-col md:flex-row">
         <Sidebar />
-        <main className="flex-1 px-6 py-8 md:px-10">
+        <main className="min-w-0 flex-1 px-4 py-6 md:px-10 md:py-8">
           <div className="mx-auto max-w-5xl">{children}</div>
         </main>
       </div>

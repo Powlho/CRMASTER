@@ -69,7 +69,7 @@ export default function AdminPage() {
       <NewUserForm currentUserId={currentUser.id} onCreated={refresh} />
 
       {!loading && (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-slate-100 bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
               <tr>

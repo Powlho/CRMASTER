@@ -18,6 +18,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Fichier audio manquant." }, { status: 400 });
   }
   const profile = getTranscriptionProfile(formData.get("profile")?.toString());
+  const speakersExpected = Number(formData.get("speakersExpected"));
+  const hasSpeakersHint =
+    Number.isInteger(speakersExpected) && speakersExpected >= 1 && speakersExpected <= 10;
 
   const audioBuffer = await audio.arrayBuffer();
 
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
       summary_model: "informative",
       summary_type: "bullets",
       speaker_labels: true,
+      ...(hasSpeakersHint ? { speakers_expected: speakersExpected } : {}),
       ...(profile.words.length > 0
         ? { word_boost: profile.words, boost_param: "high" }
         : {}),
