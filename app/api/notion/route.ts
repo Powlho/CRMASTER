@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUserById } from "@/lib/data/users";
 
 const NOTION_BASE = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -41,6 +42,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "NOTION_API_KEY et/ou NOTION_DATABASE_ID ne sont pas configurés sur le serveur." },
       { status: 500 }
+    );
+  }
+
+  const userId = req.headers.get("x-user-id");
+  const user = userId ? await getUserById(userId) : undefined;
+  if (!user?.notionEnabled) {
+    return NextResponse.json(
+      { error: "L'envoi vers Notion n'est pas activé pour votre compte." },
+      { status: 403 }
     );
   }
 

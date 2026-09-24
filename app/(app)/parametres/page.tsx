@@ -45,20 +45,26 @@ export default function SettingsPage() {
           <StatusPill ok={config?.auth} />
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
-          <li>Choisissez un mot de passe d&apos;accès à l&apos;application.</li>
           <li>
             Générez une clé de signature (dans un terminal sur le serveur) :
             <code className="mt-1 block rounded bg-slate-100 px-2 py-1">openssl rand -hex 32</code>
           </li>
           <li>
-            Renseignez les deux dans <code className="rounded bg-slate-100 px-1">.env.local</code> :
+            Renseignez, dans <code className="rounded bg-slate-100 px-1">.env.local</code>, la clé
+            générée et le mot de passe du tout premier compte (administrateur, identifiant{" "}
+            <code className="rounded bg-slate-100 px-1">admin</code>) :
             <code className="mt-1 block rounded bg-slate-100 px-2 py-1">
-              APP_PASSWORD=votre_mot_de_passe
+              APP_PASSWORD=mot_de_passe_du_premier_compte_admin
               <br />
               AUTH_SECRET=la_valeur_générée_ci-dessus
             </code>
           </li>
-          <li>Redémarrez le serveur. Sans ces deux variables, l&apos;application reste bloquée.</li>
+          <li>Redémarrez le serveur, puis connectez-vous avec l&apos;identifiant « admin ».</li>
+          <li>
+            Créez les autres comptes (ex. pour un autre membre du foyer) depuis la page{" "}
+            <strong>Administration</strong> — chacun a sa propre liste de réunions, et
+            l&apos;envoi vers Notion s&apos;active individuellement par compte.
+          </li>
         </ol>
       </section>
 
@@ -132,6 +138,11 @@ export default function SettingsPage() {
             </code>
           </li>
           <li>Redémarrez le serveur.</li>
+          <li>
+            Activez l&apos;envoi vers Notion pour les comptes concernés depuis la page{" "}
+            <strong>Administration</strong> (désactivé par défaut, sauf pour l&apos;admin
+            initial).
+          </li>
         </ol>
       </section>
     </div>

@@ -33,19 +33,22 @@ function writeAll(meetings: Meeting[]): Promise<void> {
   return writeQueue as Promise<void>;
 }
 
-export async function listMeetings(): Promise<Meeting[]> {
+export async function listMeetings(userId: string): Promise<Meeting[]> {
   const meetings = await readAll();
-  return meetings.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return meetings
+    .filter((m) => m.userId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function getMeetingById(id: string): Promise<Meeting | undefined> {
+export async function getMeetingById(id: string, userId: string): Promise<Meeting | undefined> {
   const meetings = await readAll();
-  return meetings.find((m) => m.id === id);
+  return meetings.find((m) => m.id === id && m.userId === userId);
 }
 
-export async function insertMeeting(input: NewMeetingInput): Promise<Meeting> {
+export async function insertMeeting(input: NewMeetingInput, userId: string): Promise<Meeting> {
   const meeting: Meeting = {
     id: crypto.randomUUID(),
+    userId,
     ...input,
     status: "planifiee",
     transcriptionStatus: "indisponible",
@@ -61,17 +64,34 @@ export async function insertMeeting(input: NewMeetingInput): Promise<Meeting> {
 
 export async function patchMeeting(
   id: string,
+  userId: string,
   patch: Partial<Meeting>
 ): Promise<Meeting | undefined> {
   const meetings = await readAll();
-  const index = meetings.findIndex((m) => m.id === id);
+  const index = meetings.findIndex((m) => m.id === id && m.userId === userId);
   if (index === -1) return undefined;
   meetings[index] = { ...meetings[index], ...patch };
   await writeAll(meetings);
   return meetings[index];
 }
 
-export async function removeMeeting(id: string): Promise<void> {
+export async function removeMeeting(id: string, userId: string): Promise<void> {
   const meetings = await readAll();
-  await writeAll(meetings.filter((m) => m.id !== id));
+  await writeAll(meetings.filter((m) => !(m.id === id && m.userId === userId)));
+}
+
+/**
+ * Réunions créées avant l'introduction des comptes utilisateurs (pas de userId) : on les
+ * rattache au compte admin plutôt que de les rendre invisibles à tout le monde.
+ */
+export async function migrateOwnerlessMeetings(ownerId: string): Promise<void> {
+  const meetings = await readAll();
+  let changed = false;
+  for (const m of meetings) {
+    if (!m.userId) {
+      m.userId = ownerId;
+      changed = true;
+    }
+  }
+  if (changed) await writeAll(meetings);
 }

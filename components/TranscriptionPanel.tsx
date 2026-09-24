@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Meeting } from "@/lib/types";
 import { useConfigStatus } from "@/lib/useConfigStatus";
+import { useCurrentUser } from "@/lib/useCurrentUser";
 import { getReportFormat } from "@/lib/reportFormats";
 
 const TRANSCRIPTION_LABELS: Record<Meeting["transcriptionStatus"], string> = {
@@ -37,6 +38,7 @@ export default function TranscriptionPanel({
   onUpdate,
 }: TranscriptionPanelProps) {
   const config = useConfigStatus();
+  const currentUser = useCurrentUser();
   const [error, setError] = useState<string | null>(null);
   const [notionError, setNotionError] = useState<string | null>(null);
   const [sendingToNotion, setSendingToNotion] = useState(false);
@@ -209,16 +211,23 @@ export default function TranscriptionPanel({
   }, [meeting.transcriptionStatus, meeting.formattedReport, config?.assemblyAI]);
 
   // Dès que la transcription (et le compte rendu mis en forme, le cas échéant) est prête et
-  // Notion configuré, on pousse la page automatiquement.
+  // Notion configuré et activé pour ce compte, on pousse la page automatiquement.
   useEffect(() => {
     if (meeting.transcriptionStatus !== "terminee") return;
     if (reportFormat.prompt && !meeting.formattedReport) return;
     if (meeting.notionStatus === "envoyee") return;
     if (!config?.notion) return;
+    if (!currentUser?.notionEnabled) return;
     if (sendingToNotion) return;
     handleSendToNotion();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meeting.transcriptionStatus, meeting.formattedReport, meeting.notionStatus, config?.notion]);
+  }, [
+    meeting.transcriptionStatus,
+    meeting.formattedReport,
+    meeting.notionStatus,
+    config?.notion,
+    currentUser?.notionEnabled,
+  ]);
 
   const hasRecording =
     meeting.status !== "planifiee" && meeting.status !== "enregistrement_en_cours";
@@ -230,6 +239,7 @@ export default function TranscriptionPanel({
     meeting.transcriptionStatus !== "terminee";
   const canSendToNotion =
     Boolean(config?.notion) &&
+    Boolean(currentUser?.notionEnabled) &&
     meeting.transcriptionStatus === "terminee" &&
     meeting.notionStatus !== "envoyee";
 
@@ -242,7 +252,9 @@ export default function TranscriptionPanel({
         <h2 className="text-base font-semibold text-slate-900">Transcription &amp; Notion</h2>
       </div>
       <p className="mb-5 text-sm text-slate-500">
-        Automatique via AssemblyAI, puis envoi vers votre base Notion — sans action requise.
+        {currentUser?.notionEnabled
+          ? "Automatique via AssemblyAI, puis envoi vers votre base Notion — sans action requise."
+          : "Automatique via AssemblyAI — sans action requise."}
       </p>
 
       <div className="space-y-4">
@@ -332,50 +344,57 @@ export default function TranscriptionPanel({
           )}
         </div>
 
-        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {sendingToNotion ? (
-                <Loader2 size={16} className="animate-spin text-brand-500" />
-              ) : meeting.notionStatus === "envoyee" ? (
-                <CheckCircle2 size={16} className="text-emerald-500" />
-              ) : (
-                <NotebookText size={16} className="text-slate-400" />
-              )}
-              <div>
-                <p className="text-sm font-medium text-slate-800">Envoi vers Notion</p>
-                <p className="text-xs text-slate-500">{NOTION_LABELS[meeting.notionStatus]}</p>
+        {currentUser?.notionEnabled ? (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {sendingToNotion ? (
+                  <Loader2 size={16} className="animate-spin text-brand-500" />
+                ) : meeting.notionStatus === "envoyee" ? (
+                  <CheckCircle2 size={16} className="text-emerald-500" />
+                ) : (
+                  <NotebookText size={16} className="text-slate-400" />
+                )}
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Envoi vers Notion</p>
+                  <p className="text-xs text-slate-500">{NOTION_LABELS[meeting.notionStatus]}</p>
+                </div>
               </div>
+              <button
+                onClick={handleSendToNotion}
+                disabled={!canSendToNotion || sendingToNotion}
+                title={
+                  !config?.notion
+                    ? "Configurez NOTION_API_KEY et NOTION_DATABASE_ID côté serveur"
+                    : undefined
+                }
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
+                  canSendToNotion && !sendingToNotion
+                    ? "bg-brand-500 text-white hover:bg-brand-600"
+                    : "cursor-not-allowed bg-slate-200 text-slate-500"
+                }`}
+              >
+                {sendingToNotion ? "Envoi…" : "Envoyer vers Notion"}
+              </button>
             </div>
-            <button
-              onClick={handleSendToNotion}
-              disabled={!canSendToNotion || sendingToNotion}
-              title={
-                !config?.notion
-                  ? "Configurez NOTION_API_KEY et NOTION_DATABASE_ID côté serveur"
-                  : undefined
-              }
-              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
-                canSendToNotion && !sendingToNotion
-                  ? "bg-brand-500 text-white hover:bg-brand-600"
-                  : "cursor-not-allowed bg-slate-200 text-slate-500"
-              }`}
-            >
-              {sendingToNotion ? "Envoi…" : "Envoyer vers Notion"}
-            </button>
+            {notionError && <p className="mt-2 text-xs text-red-600">{notionError}</p>}
+            {meeting.notionPageUrl && (
+              <a
+                href={meeting.notionPageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
+              >
+                Ouvrir la page Notion <ExternalLink size={12} />
+              </a>
+            )}
           </div>
-          {notionError && <p className="mt-2 text-xs text-red-600">{notionError}</p>}
-          {meeting.notionPageUrl && (
-            <a
-              href={meeting.notionPageUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
-            >
-              Ouvrir la page Notion <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
+        ) : currentUser ? (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+            Notion n&apos;est pas activé pour votre compte. Copiez le compte rendu ci-dessus
+            là où vous en avez besoin.
+          </div>
+        ) : null}
       </div>
 
       {!hasRecording && (

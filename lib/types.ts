@@ -22,6 +22,7 @@ export interface TranscriptUtterance {
 
 export interface Meeting {
   id: string;
+  userId: string;
   title: string;
   type: MeetingType;
   date: string;

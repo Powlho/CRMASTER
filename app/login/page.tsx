@@ -6,6 +6,7 @@ import { Lock } from "lucide-react";
 
 function LoginForm() {
   const searchParams = useSearchParams();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,11 +19,11 @@ function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || "Mot de passe incorrect.");
+        setError(data.error || "Identifiants incorrects.");
         setLoading(false);
         return;
       }
@@ -46,10 +47,19 @@ function LoginForm() {
         <h1 className="text-lg font-bold text-slate-900">CRMASTER</h1>
         <p className="mt-1 text-sm text-slate-500">Accès protégé</p>
       </div>
+      <label className="mb-1 block text-sm font-medium text-slate-700">Nom d&apos;utilisateur</label>
+      <input
+        type="text"
+        autoFocus
+        required
+        autoCapitalize="none"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+      />
       <label className="mb-1 block text-sm font-medium text-slate-700">Mot de passe</label>
       <input
         type="password"
-        autoFocus
         required
         value={password}
         onChange={(e) => setPassword(e.target.value)}

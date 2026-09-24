@@ -227,8 +227,7 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
         </audio>
       )}
       <p className="text-xs text-slate-400">
-        L&apos;audio est envoyé automatiquement à votre serveur pour être transcrit puis
-        poussé vers Notion.
+        L&apos;audio est envoyé automatiquement à votre serveur pour être transcrit.
       </p>
     </div>
   );

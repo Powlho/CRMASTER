@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarClock, LogOut, Plus, Settings, Video } from "lucide-react";
+import { CalendarClock, LogOut, Plus, Settings, Shield, Video } from "lucide-react";
+import { useCurrentUser } from "@/lib/useCurrentUser";
 
 const links = [
   { href: "/", label: "Réunions", icon: CalendarClock },
@@ -12,11 +13,17 @@ const links = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const currentUser = useCurrentUser();
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
   }
+
+  const allLinks =
+    currentUser?.role === "admin"
+      ? [...links, { href: "/admin", label: "Administration", icon: Shield }]
+      : links;
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white/80 px-4 py-8 backdrop-blur md:flex">
@@ -27,7 +34,7 @@ export default function Sidebar() {
         <span className="text-lg font-bold tracking-tight text-slate-900">CRMASTER</span>
       </div>
       <nav className="space-y-1">
-        {links.map((link) => {
+        {allLinks.map((link) => {
           const active =
             link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
           const Icon = link.icon;
@@ -51,6 +58,11 @@ export default function Sidebar() {
         })}
       </nav>
       <div className="mt-auto pt-6">
+        {currentUser && (
+          <p className="mb-2 truncate px-3 text-xs text-slate-400">
+            Connecté : {currentUser.username}
+          </p>
+        )}
         <button
           onClick={handleLogout}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100"
