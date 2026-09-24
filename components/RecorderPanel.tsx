@@ -16,7 +16,12 @@ function formatDuration(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
-export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
+interface RecorderPanelProps {
+  meeting: Meeting;
+  onRecordingComplete?: (blob: Blob) => void;
+}
+
+export default function RecorderPanel({ meeting, onRecordingComplete }: RecorderPanelProps) {
   const { updateMeeting } = useMeetings();
   const [state, setState] = useState<RecorderState>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -72,6 +77,7 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
         streamRef.current?.getTracks().forEach((t) => t.stop());
+        onRecordingComplete?.(blob);
       };
 
       mediaRecorderRef.current = recorder;

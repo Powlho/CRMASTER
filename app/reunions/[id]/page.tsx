@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMeetings } from "@/lib/store";
 import { MeetingStatusBadge, MeetingTypeBadge } from "@/components/StatusBadge";
@@ -8,8 +9,9 @@ import TranscriptionPanel from "@/components/TranscriptionPanel";
 
 export default function MeetingDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const { getMeeting, deleteMeeting, ready } = useMeetings();
+  const { getMeeting, updateMeeting, deleteMeeting, ready } = useMeetings();
   const meeting = getMeeting(params.id);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
 
   if (!ready) {
     return <p className="text-sm text-slate-400">Chargement…</p>;
@@ -91,8 +93,12 @@ export default function MeetingDetailPage({ params }: { params: { id: string } }
       )}
 
       <div className="space-y-6">
-        <RecorderPanel meeting={meeting} />
-        <TranscriptionPanel meeting={meeting} />
+        <RecorderPanel meeting={meeting} onRecordingComplete={setAudioBlob} />
+        <TranscriptionPanel
+          meeting={meeting}
+          audioBlob={audioBlob}
+          onUpdate={(patch) => updateMeeting(meeting.id, patch)}
+        />
       </div>
     </div>
   );
