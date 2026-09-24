@@ -39,7 +39,21 @@ export default function TranscriptionPanel({
   const [error, setError] = useState<string | null>(null);
   const [notionError, setNotionError] = useState<string | null>(null);
   const [sendingToNotion, setSendingToNotion] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  function notify(title: string, body: string) {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "granted") return;
+    new Notification(title, { body });
+  }
 
   async function handleGenerateTranscription() {
     setError(null);
@@ -92,6 +106,7 @@ export default function TranscriptionPanel({
         return;
       }
       onUpdate({ notionStatus: "envoyee", notionPageUrl: data.url });
+      notify("Envoyée sur Notion", meeting.title);
     } catch {
       setNotionError("Impossible de contacter Notion.");
     } finally {
@@ -120,6 +135,7 @@ export default function TranscriptionPanel({
             transcriptSummary: data.summary ?? undefined,
             notionStatus: "a_envoyer",
           });
+          notify("Transcription terminée", meeting.title);
           if (pollRef.current) clearInterval(pollRef.current);
         }
       } catch {
@@ -218,6 +234,22 @@ export default function TranscriptionPanel({
             <div className="mt-3 rounded-lg bg-white p-3 text-xs text-slate-600">
               <p className="mb-1 font-semibold text-slate-700">Résumé</p>
               <p className="whitespace-pre-wrap">{meeting.transcriptSummary}</p>
+            </div>
+          )}
+          {meeting.transcriptText && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowTranscript((s) => !s)}
+                className="text-xs font-medium text-brand-600 hover:underline"
+              >
+                {showTranscript ? "Masquer la transcription complète" : "Voir la transcription complète"}
+              </button>
+              {showTranscript && (
+                <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs text-slate-600">
+                  {meeting.transcriptText}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -73,9 +73,14 @@ cd "$APP_DIR"
 
 if [[ ! -f .env.local ]]; then
   cp .env.example .env.local
-  echo "!! Fichier .env.local créé, vide. Éditez-le avant de continuer :"
+  if command -v openssl >/dev/null 2>&1; then
+    GENERATED_SECRET=$(openssl rand -hex 32)
+    sed -i "s#^AUTH_SECRET=.*#AUTH_SECRET=${GENERATED_SECRET}#" .env.local
+  fi
+  echo "!! Fichier .env.local créé. Éditez-le avant de continuer :"
   echo "   nano $APP_DIR/.env.local"
-  echo "   (ASSEMBLYAI_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID)"
+  echo "   (ASSEMBLYAI_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID, APP_PASSWORD"
+  echo "    — AUTH_SECRET a déjà été généré automatiquement)"
   read -rp "Appuyez sur Entrée une fois les clés renseignées pour continuer..." _
 fi
 
@@ -103,6 +108,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 }

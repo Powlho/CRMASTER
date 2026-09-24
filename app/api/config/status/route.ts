@@ -4,5 +4,6 @@ export async function GET() {
   return NextResponse.json({
     assemblyAI: Boolean(process.env.ASSEMBLYAI_API_KEY),
     notion: Boolean(process.env.NOTION_API_KEY && process.env.NOTION_DATABASE_ID),
+    auth: Boolean(process.env.APP_PASSWORD && process.env.AUTH_SECRET),
   });
 }

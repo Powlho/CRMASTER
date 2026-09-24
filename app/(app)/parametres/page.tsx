@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, NotebookText } from "lucide-react";
+import { Lock, Mic, NotebookText } from "lucide-react";
 import { useConfigStatus } from "@/lib/useConfigStatus";
 
 function StatusPill({ ok }: { ok: boolean | undefined }) {
@@ -33,6 +33,34 @@ export default function SettingsPage() {
         une base Notion. Les identifiants se configurent côté serveur, via variables
         d&apos;environnement (jamais dans le navigateur).
       </p>
+
+      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+              <Lock size={15} />
+            </div>
+            <h2 className="text-base font-semibold text-slate-900">Accès (mot de passe)</h2>
+          </div>
+          <StatusPill ok={config?.auth} />
+        </div>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
+          <li>Choisissez un mot de passe d&apos;accès à l&apos;application.</li>
+          <li>
+            Générez une clé de signature (dans un terminal sur le serveur) :
+            <code className="mt-1 block rounded bg-slate-100 px-2 py-1">openssl rand -hex 32</code>
+          </li>
+          <li>
+            Renseignez les deux dans <code className="rounded bg-slate-100 px-1">.env.local</code> :
+            <code className="mt-1 block rounded bg-slate-100 px-2 py-1">
+              APP_PASSWORD=votre_mot_de_passe
+              <br />
+              AUTH_SECRET=la_valeur_générée_ci-dessus
+            </code>
+          </li>
+          <li>Redémarrez le serveur. Sans ces deux variables, l&apos;application reste bloquée.</li>
+        </ol>
+      </section>
 
       <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">

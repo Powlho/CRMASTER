@@ -6,8 +6,18 @@ Copiez `.env.example` en `.env.local` et renseignez :
 
 - `ASSEMBLYAI_API_KEY` — clé API [AssemblyAI](https://www.assemblyai.com/) (transcription)
 - `NOTION_API_KEY` et `NOTION_DATABASE_ID` — intégration [Notion](https://www.notion.so/my-integrations) (envoi des comptes-rendus)
+- `APP_PASSWORD` et `AUTH_SECRET` — protègent l'accès à l'application (obligatoires dès que le
+  site est exposé publiquement ; `AUTH_SECRET` se génère avec `openssl rand -hex 32`)
 
-Détails pas à pas dans la page **Paramètres** de l'application.
+Détails pas à pas dans la page **Paramètres** de l'application. Les réunions sont stockées
+côté serveur dans `DATA_DIR` (par défaut `./data`, en JSON) — ce dossier n'est jamais commit.
+
+### Mettre à jour une instance déjà déployée
+
+Ajoutez simplement `APP_PASSWORD` et `AUTH_SECRET` à votre `.env.local` existant, puis
+redémarrez (`pm2 restart crmaster` après `bash deploy/update.sh`). Sans ces deux variables,
+l'application affiche une page « Authentification non configurée » au lieu de démarrer —
+c'est voulu, pour ne jamais laisser le site ouvert par erreur.
 
 ## Développement
 

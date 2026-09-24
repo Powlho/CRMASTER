@@ -10,27 +10,10 @@ import {
 } from "react";
 import type { Meeting, MeetingStatus, NewMeetingInput } from "./types";
 
-const STORAGE_KEY = "crmaster.meetings.v1";
-
-function loadMeetings(): Meeting[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Meeting[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveMeetings(meetings: Meeting[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(meetings));
-}
-
 interface MeetingsContextValue {
   meetings: Meeting[];
   ready: boolean;
-  createMeeting: (input: NewMeetingInput) => Meeting;
+  createMeeting: (input: NewMeetingInput) => Promise<Meeting>;
   updateMeeting: (id: string, patch: Partial<Meeting>) => void;
   setStatus: (id: string, status: MeetingStatus) => void;
   getMeeting: (id: string) => Meeting | undefined;
@@ -44,32 +27,30 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setMeetings(loadMeetings());
-    setReady(true);
+    fetch("/api/meetings")
+      .then((r) => r.json())
+      .then((data: Meeting[]) => setMeetings(data))
+      .finally(() => setReady(true));
   }, []);
 
-  useEffect(() => {
-    if (ready) saveMeetings(meetings);
-  }, [meetings, ready]);
-
-  const createMeeting = useCallback((input: NewMeetingInput) => {
-    const meeting: Meeting = {
-      id: crypto.randomUUID(),
-      ...input,
-      status: "planifiee",
-      transcriptionStatus: "indisponible",
-      notionStatus: "non_configure",
-      recordingDurationSec: null,
-      createdAt: new Date().toISOString(),
-    };
+  const createMeeting = useCallback(async (input: NewMeetingInput) => {
+    const res = await fetch("/api/meetings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const meeting = (await res.json()) as Meeting;
     setMeetings((prev) => [meeting, ...prev]);
     return meeting;
   }, []);
 
   const updateMeeting = useCallback((id: string, patch: Partial<Meeting>) => {
-    setMeetings((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
-    );
+    setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    fetch(`/api/meetings/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {});
   }, []);
 
   const setStatus = useCallback(
@@ -84,6 +65,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMeeting = useCallback((id: string) => {
     setMeetings((prev) => prev.filter((m) => m.id !== id));
+    fetch(`/api/meetings/${id}`, { method: "DELETE" }).catch(() => {});
   }, []);
 
   const value = useMemo(

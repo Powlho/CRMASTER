@@ -17,10 +17,10 @@ export default function NewMeetingPage() {
   const [participants, setParticipants] = useState("");
   const [notes, setNotes] = useState("");
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    const meeting = createMeeting({ title, type, date, time, participants, notes });
+    const meeting = await createMeeting({ title, type, date, time, participants, notes });
     router.push(`/reunions/${meeting.id}`);
   }
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 export interface ConfigStatus {
   assemblyAI: boolean;
   notion: boolean;
+  auth: boolean;
 }
 
 export function useConfigStatus() {
@@ -18,7 +19,7 @@ export function useConfigStatus() {
         if (!cancelled) setStatus(data);
       })
       .catch(() => {
-        if (!cancelled) setStatus({ assemblyAI: false, notion: false });
+        if (!cancelled) setStatus({ assemblyAI: false, notion: false, auth: false });
       });
     return () => {
       cancelled = true;
