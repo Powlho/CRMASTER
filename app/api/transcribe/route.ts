@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getTranscriptionProfile } from "@/lib/transcriptionProfiles";
 
 const ASSEMBLYAI_BASE = "https://api.assemblyai.com/v2";
 
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest) {
   if (!(audio instanceof Blob)) {
     return NextResponse.json({ error: "Fichier audio manquant." }, { status: 400 });
   }
+  const profile = getTranscriptionProfile(formData.get("profile")?.toString());
 
   const audioBuffer = await audio.arrayBuffer();
 
@@ -41,6 +43,10 @@ export async function POST(req: NextRequest) {
       summarization: true,
       summary_model: "informative",
       summary_type: "bullets",
+      speaker_labels: true,
+      ...(profile.words.length > 0
+        ? { word_boost: profile.words, boost_param: "high" }
+        : {}),
     }),
   });
   if (!transcriptRes.ok) {

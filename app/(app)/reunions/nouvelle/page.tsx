@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MonitorUp, Users } from "lucide-react";
 import { useMeetings } from "@/lib/store";
 import type { MeetingType } from "@/lib/types";
+import { TRANSCRIPTION_PROFILES } from "@/lib/transcriptionProfiles";
 
 export default function NewMeetingPage() {
   const router = useRouter();
@@ -16,11 +17,20 @@ export default function NewMeetingPage() {
   const [time, setTime] = useState("10:00");
   const [participants, setParticipants] = useState("");
   const [notes, setNotes] = useState("");
+  const [transcriptionProfile, setTranscriptionProfile] = useState("none");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    const meeting = await createMeeting({ title, type, date, time, participants, notes });
+    const meeting = await createMeeting({
+      title,
+      type,
+      date,
+      time,
+      participants,
+      notes,
+      transcriptionProfile,
+    });
     router.push(`/reunions/${meeting.id}`);
   }
 
@@ -99,6 +109,29 @@ export default function NewMeetingPage() {
             placeholder="Ex : Marie Dupont, Jean Martin"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Profil de vocabulaire{" "}
+            <span className="font-normal text-slate-400">
+              (améliore la reconnaissance des termes spécifiques)
+            </span>
+          </label>
+          <select
+            value={transcriptionProfile}
+            onChange={(e) => setTranscriptionProfile(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            {TRANSCRIPTION_PROFILES.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-400">
+            {TRANSCRIPTION_PROFILES.find((p) => p.id === transcriptionProfile)?.description}
+          </p>
         </div>
 
         <div>

@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     participants: string;
     summary: string | null;
     transcript: string;
+    utterances: { speaker: string; text: string }[] | null;
   };
 
   const headers = {
@@ -104,7 +105,11 @@ export async function POST(req: NextRequest) {
   }
 
   blocks.push(heading("Transcription complète"));
-  for (const chunk of chunkText(body.transcript)) blocks.push(paragraph(chunk));
+  const transcriptText =
+    body.utterances && body.utterances.length > 0
+      ? body.utterances.map((u) => `Intervenant ${u.speaker} : ${u.text}`).join("\n\n")
+      : body.transcript;
+  for (const chunk of chunkText(transcriptText)) blocks.push(paragraph(chunk));
 
   const pageRes = await fetch(`${NOTION_BASE}/pages`, {
     method: "POST",

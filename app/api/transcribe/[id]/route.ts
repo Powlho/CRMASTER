@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
+interface AssemblyAIUtterance {
+  speaker: string;
+  text: string;
+}
+
 interface AssemblyAITranscript {
   status: "queued" | "processing" | "completed" | "error";
   text: string | null;
   summary: string | null;
   error: string | null;
+  utterances: AssemblyAIUtterance[] | null;
 }
 
 export async function GET(
@@ -41,5 +47,6 @@ export async function GET(
     status: data.status,
     text: data.text,
     summary: data.summary,
+    utterances: data.utterances?.map((u) => ({ speaker: u.speaker, text: u.text })) ?? null,
   });
 }

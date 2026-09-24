@@ -7,6 +7,7 @@ import { useMeetings } from "@/lib/store";
 import { MeetingStatusBadge, MeetingTypeBadge } from "@/components/StatusBadge";
 import RecorderPanel from "@/components/RecorderPanel";
 import TranscriptionPanel from "@/components/TranscriptionPanel";
+import { getTranscriptionProfile } from "@/lib/transcriptionProfiles";
 
 export default function MeetingDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -62,9 +63,14 @@ export default function MeetingDetailPage({ params }: { params: { id: string } }
             })}{" "}
             à {meeting.time}
           </p>
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <MeetingTypeBadge type={meeting.type} />
             <MeetingStatusBadge status={meeting.status} />
+            {meeting.transcriptionProfile && meeting.transcriptionProfile !== "none" && (
+              <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">
+                {getTranscriptionProfile(meeting.transcriptionProfile).label}
+              </span>
+            )}
           </div>
         </div>
         <button

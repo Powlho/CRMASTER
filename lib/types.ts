@@ -15,6 +15,11 @@ export type TranscriptionStatus =
 
 export type NotionStatus = "non_configure" | "a_envoyer" | "envoyee";
 
+export interface TranscriptUtterance {
+  speaker: string;
+  text: string;
+}
+
 export interface Meeting {
   id: string;
   title: string;
@@ -23,6 +28,7 @@ export interface Meeting {
   time: string;
   participants: string;
   notes: string;
+  transcriptionProfile: string;
   status: MeetingStatus;
   transcriptionStatus: TranscriptionStatus;
   notionStatus: NotionStatus;
@@ -31,10 +37,11 @@ export interface Meeting {
   assemblyTranscriptId?: string;
   transcriptText?: string;
   transcriptSummary?: string;
+  transcriptUtterances?: TranscriptUtterance[];
   notionPageUrl?: string;
 }
 
 export type NewMeetingInput = Pick<
   Meeting,
-  "title" | "type" | "date" | "time" | "participants" | "notes"
+  "title" | "type" | "date" | "time" | "participants" | "notes" | "transcriptionProfile"
 >;

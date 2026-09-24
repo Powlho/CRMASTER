@@ -66,6 +66,7 @@ export default function TranscriptionPanel({
 
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.webm");
+    formData.append("profile", meeting.transcriptionProfile || "none");
 
     onUpdate({ transcriptionStatus: "en_cours" });
     try {
@@ -98,6 +99,7 @@ export default function TranscriptionPanel({
           participants: meeting.participants,
           summary: meeting.transcriptSummary ?? null,
           transcript: meeting.transcriptText ?? "",
+          utterances: meeting.transcriptUtterances ?? null,
         }),
       });
       const data = await res.json();
@@ -133,6 +135,7 @@ export default function TranscriptionPanel({
             transcriptionStatus: "terminee",
             transcriptText: data.text ?? "",
             transcriptSummary: data.summary ?? undefined,
+            transcriptUtterances: data.utterances ?? undefined,
             notionStatus: "a_envoyer",
           });
           notify("Transcription terminée", meeting.title);
@@ -246,8 +249,21 @@ export default function TranscriptionPanel({
                 {showTranscript ? "Masquer la transcription complète" : "Voir la transcription complète"}
               </button>
               {showTranscript && (
-                <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs text-slate-600">
-                  {meeting.transcriptText}
+                <div className="mt-2 max-h-72 overflow-y-auto rounded-lg bg-white p-3 text-xs text-slate-600">
+                  {meeting.transcriptUtterances && meeting.transcriptUtterances.length > 0 ? (
+                    <div className="space-y-2">
+                      {meeting.transcriptUtterances.map((u, i) => (
+                        <p key={i}>
+                          <span className="font-semibold text-slate-700">
+                            Intervenant {u.speaker} :{" "}
+                          </span>
+                          {u.text}
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{meeting.transcriptText}</p>
+                  )}
                 </div>
               )}
             </div>
