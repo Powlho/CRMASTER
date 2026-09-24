@@ -28,6 +28,10 @@ export interface Meeting {
   notionStatus: NotionStatus;
   recordingDurationSec: number | null;
   createdAt: string;
+  assemblyTranscriptId?: string;
+  transcriptText?: string;
+  transcriptSummary?: string;
+  notionPageUrl?: string;
 }
 
 export type NewMeetingInput = Pick<

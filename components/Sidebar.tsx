@@ -2,39 +2,44 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CalendarClock, Plus, Settings, Video } from "lucide-react";
 
 const links = [
-  { href: "/", label: "Réunions", icon: "📅" },
-  { href: "/reunions/nouvelle", label: "Nouvelle réunion", icon: "➕" },
-  { href: "/parametres", label: "Paramètres", icon: "⚙️" },
+  { href: "/", label: "Réunions", icon: CalendarClock },
+  { href: "/reunions/nouvelle", label: "Nouvelle réunion", icon: Plus },
+  { href: "/parametres", label: "Paramètres", icon: Settings },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white px-4 py-8 md:block">
-      <div className="mb-10 flex items-center gap-2 px-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
-          CM
+    <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white/80 px-4 py-8 backdrop-blur md:block">
+      <div className="mb-10 flex items-center gap-2.5 px-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 text-white shadow-sm">
+          <Video size={18} />
         </div>
-        <span className="text-lg font-semibold text-slate-900">CRMASTER</span>
+        <span className="text-lg font-bold tracking-tight text-slate-900">CRMASTER</span>
       </div>
       <nav className="space-y-1">
         {links.map((link) => {
           const active =
             link.href === "/" ? pathname === "/" : pathname.startsWith(link.href);
+          const Icon = link.icon;
           return (
             <Link
               key={link.href}
               href={link.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 active
                   ? "bg-brand-50 text-brand-700"
                   : "text-slate-600 hover:bg-slate-100"
               }`}
             >
-              <span aria-hidden>{link.icon}</span>
+              {active && (
+                <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-brand-500 to-violet-500" />
+              )}
+              <Icon size={17} strokeWidth={2.25} />
               {link.label}
             </Link>
           );

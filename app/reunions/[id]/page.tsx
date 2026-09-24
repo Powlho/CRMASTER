@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { useMeetings } from "@/lib/store";
 import { MeetingStatusBadge, MeetingTypeBadge } from "@/components/StatusBadge";
 import RecorderPanel from "@/components/RecorderPanel";
@@ -8,8 +10,9 @@ import TranscriptionPanel from "@/components/TranscriptionPanel";
 
 export default function MeetingDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const { getMeeting, deleteMeeting, ready } = useMeetings();
+  const { getMeeting, updateMeeting, deleteMeeting, ready } = useMeetings();
   const meeting = getMeeting(params.id);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
 
   if (!ready) {
     return <p className="text-sm text-slate-400">Chargement…</p>;
@@ -41,14 +44,15 @@ export default function MeetingDetailPage({ params }: { params: { id: string } }
     <div className="max-w-3xl">
       <button
         onClick={() => router.push("/")}
-        className="mb-6 text-sm text-slate-500 hover:text-slate-700"
+        className="mb-6 flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700"
       >
-        ← Toutes les réunions
+        <ArrowLeft size={15} />
+        Toutes les réunions
       </button>
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">{meeting.title}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">{meeting.title}</h1>
           <p className="mt-1 text-sm text-slate-500">
             {new Date(`${meeting.date}T${meeting.time || "00:00"}`).toLocaleDateString("fr-FR", {
               weekday: "long",
@@ -65,14 +69,15 @@ export default function MeetingDetailPage({ params }: { params: { id: string } }
         </div>
         <button
           onClick={handleDelete}
-          className="text-sm text-slate-400 hover:text-red-600"
+          className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-red-600"
         >
+          <Trash2 size={15} />
           Supprimer
         </button>
       </div>
 
       {(meeting.participants || meeting.notes) && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           {meeting.participants && (
             <div className="mb-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -91,8 +96,12 @@ export default function MeetingDetailPage({ params }: { params: { id: string } }
       )}
 
       <div className="space-y-6">
-        <RecorderPanel meeting={meeting} />
-        <TranscriptionPanel meeting={meeting} />
+        <RecorderPanel meeting={meeting} onRecordingComplete={setAudioBlob} />
+        <TranscriptionPanel
+          meeting={meeting}
+          audioBlob={audioBlob}
+          onUpdate={(patch) => updateMeeting(meeting.id, patch)}
+        />
       </div>
     </div>
   );
