@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MonitorUp, Users } from "lucide-react";
 import { useMeetings } from "@/lib/store";
 import type { MeetingType } from "@/lib/types";
 
@@ -25,13 +26,13 @@ export default function NewMeetingPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-1 text-2xl font-semibold text-slate-900">Nouvelle réunion</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight text-slate-900">Nouvelle réunion</h1>
       <p className="mb-8 text-sm text-slate-500">
         Renseignez les informations de la réunion. Vous pourrez lancer l&apos;enregistrement
         depuis sa page dédiée.
       </p>
 
-      <form onSubmit={handleSubmit} className="space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <form onSubmit={handleSubmit} className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700">Titre</label>
           <input
@@ -50,13 +51,15 @@ export default function NewMeetingPage() {
               value="visio"
               current={type}
               onSelect={setType}
+              icon={MonitorUp}
               title="Visioconférence"
-              description="Capture l'audio d'un onglet ou d'une fenêtre partagée (Zoom, Meet, Teams…)."
+              description="Capture l'audio d'un onglet, d'une appli (Zoom, Meet, Teams…) ou de tout l'écran."
             />
             <TypeOption
               value="presentiel"
               current={type}
               onSelect={setType}
+              icon={Users}
               title="Présentiel"
               description="Capture l'audio via le microphone de cet appareil."
             />
@@ -121,7 +124,7 @@ export default function NewMeetingPage() {
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600"
+            className="rounded-lg bg-gradient-to-r from-brand-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
           >
             Créer la réunion
           </button>
@@ -135,12 +138,14 @@ function TypeOption({
   value,
   current,
   onSelect,
+  icon: Icon,
   title,
   description,
 }: {
   value: MeetingType;
   current: MeetingType;
   onSelect: (v: MeetingType) => void;
+  icon: typeof MonitorUp;
   title: string;
   description: string;
 }) {
@@ -149,14 +154,17 @@ function TypeOption({
     <button
       type="button"
       onClick={() => onSelect(value)}
-      className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+      className={`rounded-xl border px-4 py-3 text-left transition-all ${
         active
           ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500"
           : "border-slate-200 hover:border-slate-300"
       }`}
     >
-      <div className="text-sm font-semibold text-slate-900">{title}</div>
-      <div className="mt-1 text-xs text-slate-500">{description}</div>
+      <div className="mb-1.5 flex items-center gap-2">
+        <Icon size={15} className={active ? "text-brand-600" : "text-slate-400"} />
+        <div className="text-sm font-semibold text-slate-900">{title}</div>
+      </div>
+      <div className="text-xs text-slate-500">{description}</div>
     </button>
   );
 }

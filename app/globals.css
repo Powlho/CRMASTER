@@ -9,6 +9,9 @@ body {
 
 body {
   background-color: #f6f7fb;
+  background-image: radial-gradient(circle at top right, rgba(139, 92, 246, 0.06), transparent 40%),
+    radial-gradient(circle at 0% 20%, rgba(59, 95, 224, 0.06), transparent 35%);
+  background-attachment: fixed;
 }
 
 @keyframes pulse-rec {

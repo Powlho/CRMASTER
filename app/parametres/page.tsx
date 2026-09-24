@@ -1,5 +1,6 @@
 "use client";
 
+import { Mic, NotebookText } from "lucide-react";
 import { useConfigStatus } from "@/lib/useConfigStatus";
 
 function StatusPill({ ok }: { ok: boolean | undefined }) {
@@ -26,16 +27,21 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-1 text-2xl font-semibold text-slate-900">Paramètres</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight text-slate-900">Paramètres</h1>
       <p className="mb-8 text-sm text-slate-500">
         La transcription est assurée par AssemblyAI et les comptes-rendus sont poussés vers
         une base Notion. Les identifiants se configurent côté serveur, via variables
         d&apos;environnement (jamais dans le navigateur).
       </p>
 
-      <section className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">AssemblyAI (transcription)</h2>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+              <Mic size={15} />
+            </div>
+            <h2 className="text-base font-semibold text-slate-900">AssemblyAI (transcription)</h2>
+          </div>
           <StatusPill ok={config?.assemblyAI} />
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
@@ -62,9 +68,14 @@ export default function SettingsPage() {
         </ol>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">Notion</h2>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+              <NotebookText size={15} />
+            </div>
+            <h2 className="text-base font-semibold text-slate-900">Notion</h2>
+          </div>
           <StatusPill ok={config?.notion} />
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
