@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Meeting } from "@/lib/types";
 import { useConfigStatus } from "@/lib/useConfigStatus";
+import { getReportFormat } from "@/lib/reportFormats";
 
 const TRANSCRIPTION_LABELS: Record<Meeting["transcriptionStatus"], string> = {
   indisponible: "Disponible après l'enregistrement",
@@ -40,7 +41,10 @@ export default function TranscriptionPanel({
   const [notionError, setNotionError] = useState<string | null>(null);
   const [sendingToNotion, setSendingToNotion] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reportFormat = getReportFormat(meeting.reportFormat);
 
   useEffect(() => {
     if (typeof Notification === "undefined") return;
@@ -84,6 +88,32 @@ export default function TranscriptionPanel({
     }
   }
 
+  async function handleGenerateReport() {
+    if (!meeting.assemblyTranscriptId || !reportFormat.prompt) return;
+    setReportError(null);
+    setGeneratingReport(true);
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          transcriptId: meeting.assemblyTranscriptId,
+          formatId: meeting.reportFormat,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReportError(data.error || "Échec de la génération du compte rendu.");
+        return;
+      }
+      onUpdate({ formattedReport: data.report });
+    } catch {
+      setReportError("Impossible de contacter le serveur.");
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   async function handleSendToNotion() {
     setNotionError(null);
     setSendingToNotion(true);
@@ -100,6 +130,8 @@ export default function TranscriptionPanel({
           summary: meeting.transcriptSummary ?? null,
           transcript: meeting.transcriptText ?? "",
           utterances: meeting.transcriptUtterances ?? null,
+          formattedReport: meeting.formattedReport ?? null,
+          formattedReportLabel: reportFormat.id !== "brut" ? reportFormat.label : null,
         }),
       });
       const data = await res.json();
@@ -164,15 +196,29 @@ export default function TranscriptionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioBlob, config?.assemblyAI, meeting.transcriptionStatus]);
 
-  // Dès que la transcription est prête et Notion configuré, on pousse la page automatiquement.
+  // Dès que la transcription est prête, on génère le compte rendu mis en forme (si un format
+  // autre que « texte brut » a été choisi) avant d'envoyer vers Notion.
   useEffect(() => {
     if (meeting.transcriptionStatus !== "terminee") return;
+    if (!reportFormat.prompt) return;
+    if (meeting.formattedReport) return;
+    if (!config?.assemblyAI) return;
+    if (generatingReport) return;
+    handleGenerateReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meeting.transcriptionStatus, meeting.formattedReport, config?.assemblyAI]);
+
+  // Dès que la transcription (et le compte rendu mis en forme, le cas échéant) est prête et
+  // Notion configuré, on pousse la page automatiquement.
+  useEffect(() => {
+    if (meeting.transcriptionStatus !== "terminee") return;
+    if (reportFormat.prompt && !meeting.formattedReport) return;
     if (meeting.notionStatus === "envoyee") return;
     if (!config?.notion) return;
     if (sendingToNotion) return;
     handleSendToNotion();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meeting.transcriptionStatus, meeting.notionStatus, config?.notion]);
+  }, [meeting.transcriptionStatus, meeting.formattedReport, meeting.notionStatus, config?.notion]);
 
   const hasRecording =
     meeting.status !== "planifiee" && meeting.status !== "enregistrement_en_cours";
@@ -233,6 +279,22 @@ export default function TranscriptionPanel({
             </button>
           </div>
           {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+          {reportFormat.prompt && (
+            <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/60 p-3 text-xs text-slate-700">
+              <div className="mb-1 flex items-center gap-2">
+                {generatingReport && <Loader2 size={12} className="animate-spin text-violet-500" />}
+                <p className="font-semibold text-violet-700">{reportFormat.label}</p>
+              </div>
+              {meeting.formattedReport ? (
+                <p className="whitespace-pre-wrap">{meeting.formattedReport}</p>
+              ) : (
+                <p className="text-slate-500">
+                  {generatingReport ? "Génération en cours…" : "En attente de la transcription."}
+                </p>
+              )}
+              {reportError && <p className="mt-2 text-red-600">{reportError}</p>}
+            </div>
+          )}
           {meeting.transcriptSummary && (
             <div className="mt-3 rounded-lg bg-white p-3 text-xs text-slate-600">
               <p className="mb-1 font-semibold text-slate-700">Résumé</p>

@@ -53,6 +53,8 @@ export async function POST(req: NextRequest) {
     summary: string | null;
     transcript: string;
     utterances: { speaker: string; text: string }[] | null;
+    formattedReport: string | null;
+    formattedReportLabel: string | null;
   };
 
   const headers = {
@@ -98,6 +100,11 @@ export async function POST(req: NextRequest) {
       }`
     ),
   ];
+
+  if (body.formattedReport) {
+    blocks.push(heading(body.formattedReportLabel || "Compte rendu"));
+    for (const chunk of chunkText(body.formattedReport)) blocks.push(paragraph(chunk));
+  }
 
   if (body.summary) {
     blocks.push(heading("Résumé"));

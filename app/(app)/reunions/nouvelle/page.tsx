@@ -6,6 +6,7 @@ import { MonitorUp, Users } from "lucide-react";
 import { useMeetings } from "@/lib/store";
 import type { MeetingType } from "@/lib/types";
 import { TRANSCRIPTION_PROFILES } from "@/lib/transcriptionProfiles";
+import { REPORT_FORMATS } from "@/lib/reportFormats";
 
 export default function NewMeetingPage() {
   const router = useRouter();
@@ -18,6 +19,7 @@ export default function NewMeetingPage() {
   const [participants, setParticipants] = useState("");
   const [notes, setNotes] = useState("");
   const [transcriptionProfile, setTranscriptionProfile] = useState("none");
+  const [reportFormat, setReportFormat] = useState("brut");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,6 +32,7 @@ export default function NewMeetingPage() {
       participants,
       notes,
       transcriptionProfile,
+      reportFormat,
     });
     router.push(`/reunions/${meeting.id}`);
   }
@@ -131,6 +134,29 @@ export default function NewMeetingPage() {
           </select>
           <p className="mt-1 text-xs text-slate-400">
             {TRANSCRIPTION_PROFILES.find((p) => p.id === transcriptionProfile)?.description}
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Mise en forme du compte rendu{" "}
+            <span className="font-normal text-slate-400">
+              (généré automatiquement, en plus du texte brut)
+            </span>
+          </label>
+          <select
+            value={reportFormat}
+            onChange={(e) => setReportFormat(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            {REPORT_FORMATS.map((format) => (
+              <option key={format.id} value={format.id}>
+                {format.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-400">
+            {REPORT_FORMATS.find((f) => f.id === reportFormat)?.description}
           </p>
         </div>
 

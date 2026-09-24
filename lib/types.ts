@@ -29,6 +29,7 @@ export interface Meeting {
   participants: string;
   notes: string;
   transcriptionProfile: string;
+  reportFormat: string;
   status: MeetingStatus;
   transcriptionStatus: TranscriptionStatus;
   notionStatus: NotionStatus;
@@ -38,10 +39,18 @@ export interface Meeting {
   transcriptText?: string;
   transcriptSummary?: string;
   transcriptUtterances?: TranscriptUtterance[];
+  formattedReport?: string;
   notionPageUrl?: string;
 }
 
 export type NewMeetingInput = Pick<
   Meeting,
-  "title" | "type" | "date" | "time" | "participants" | "notes" | "transcriptionProfile"
+  | "title"
+  | "type"
+  | "date"
+  | "time"
+  | "participants"
+  | "notes"
+  | "transcriptionProfile"
+  | "reportFormat"
 >;
