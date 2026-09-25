@@ -30,8 +30,10 @@ REPO_URL="${REPO_URL:-$REPO_URL_DEFAULT}"
 read -rp "Branche à déployer [main] : " REPO_BRANCH
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
-read -rp "Nom de domaine pointant déjà vers ce VPS (laisser vide si aucun pour l'instant) : " DOMAIN
-if [[ -n "$DOMAIN" ]]; then
+read -rp "Nom(s) de domaine pointant déjà vers ce VPS, séparés par des espaces (vide si aucun) : " DOMAIN
+DOMAIN="${DOMAIN//,/ }"
+read -ra DOMAINS <<< "$DOMAIN"
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   read -rp "Email pour le certificat HTTPS (Let's Encrypt) : " CERT_EMAIL
 fi
 
@@ -98,7 +100,7 @@ echo "==> Configuration Nginx (reverse proxy vers le port 3000)"
 cat > /etc/nginx/sites-available/crmaster <<NGINX
 server {
     listen 80;
-    server_name ${DOMAIN:-_};
+    server_name ${DOMAINS[*]:-_};
 
     # Enregistrements audio : Nginx refuse par défaut tout envoi > 1 Mo (~1 min d'audio).
     client_max_body_size 500M;
@@ -124,11 +126,17 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 
-if [[ -n "$DOMAIN" ]]; then
-  echo "==> Certificat HTTPS (Let's Encrypt) pour $DOMAIN"
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+  echo "==> Certificat HTTPS (Let's Encrypt) pour : ${DOMAINS[*]}"
   apt-get install -y certbot python3-certbot-nginx
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERT_EMAIL" --redirect
-  echo "==> Terminé. Application disponible sur https://$DOMAIN"
+  CERTBOT_DOMAIN_ARGS=()
+  for d in "${DOMAINS[@]}"; do CERTBOT_DOMAIN_ARGS+=(-d "$d"); done
+  # --expand : si un certificat existe déjà pour une partie de ces domaines, on l'étend
+  # au lieu d'échouer (utile quand on ajoute un domaine en relançant le script).
+  certbot --nginx "${CERTBOT_DOMAIN_ARGS[@]}" --expand --non-interactive --agree-tos \
+    -m "$CERT_EMAIL" --redirect
+  echo "==> Terminé. Application disponible sur :"
+  for d in "${DOMAINS[@]}"; do echo "    https://$d"; done
 else
   echo "==> Terminé. Application disponible sur http://$(curl -s ifconfig.me)"
   echo "    Ajoutez un nom de domaine pointant vers cette IP puis relancez :"
