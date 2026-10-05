@@ -30,6 +30,17 @@ export async function generateText(opts: {
   }
   if (!res.ok) {
     const body = (await res.text()).slice(0, 300);
+    // Le LLM Gateway n'est pas couvert par le crédit gratuit d'AssemblyAI : sans moyen de
+    // paiement enregistré, tous les modèles sont refusés avec ce message.
+    if (/does not have access/i.test(body)) {
+      return {
+        error:
+          "Votre compte AssemblyAI n'a pas accès au service de génération (LLM Gateway), " +
+          "qui n'est pas couvert par le crédit gratuit. Ajoutez un moyen de paiement dans " +
+          "votre espace AssemblyAI (rubrique Billing), puis relancez la génération.",
+        status: 402,
+      };
+    }
     return { error: `Échec de la génération (${res.status}) : ${body}`, status: 502 };
   }
   let data: { choices?: { message?: { content?: unknown } }[] };
