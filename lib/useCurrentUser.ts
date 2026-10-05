@@ -7,6 +7,7 @@ export interface CurrentUser {
   username: string;
   role: "admin" | "user";
   notionEnabled: boolean;
+  notionReview: boolean;
   createdAt: string;
 }
 

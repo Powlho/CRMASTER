@@ -1,7 +1,9 @@
 "use client";
 
-import { Lock, Mic, NotebookText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Lock, Mic, NotebookText, SlidersHorizontal } from "lucide-react";
 import { useConfigStatus } from "@/lib/useConfigStatus";
+import { useCurrentUser } from "@/lib/useCurrentUser";
 
 function StatusPill({ ok }: { ok: boolean | undefined }) {
   if (ok === undefined) {
@@ -22,6 +24,66 @@ function StatusPill({ ok }: { ok: boolean | undefined }) {
   );
 }
 
+function Preferences() {
+  const currentUser = useCurrentUser();
+  const [review, setReview] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser) setReview(currentUser.notionReview);
+  }, [currentUser]);
+
+  if (!currentUser?.notionEnabled) return null;
+
+  async function toggle(next: boolean) {
+    setReview(next);
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notionReview: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setReview(!next);
+      setError("Préférence non enregistrée, réessayez.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+          <SlidersHorizontal size={15} />
+        </div>
+        <h2 className="text-base font-semibold text-slate-900">Mes préférences</h2>
+      </div>
+      <label className="flex items-start gap-3 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={review}
+          disabled={saving}
+          onChange={(e) => toggle(e.target.checked)}
+          className="mt-0.5 h-4 w-4"
+        />
+        <span>
+          <span className="font-medium">Relire avant l&apos;envoi vers Notion</span>
+          <span className="block text-xs text-slate-500">
+            Le compte rendu attend votre validation (après corrections et noms des
+            intervenants) au lieu de partir automatiquement dès la fin de la transcription.
+          </span>
+        </span>
+      </label>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const config = useConfigStatus();
 
@@ -33,6 +95,8 @@ export default function SettingsPage() {
         une base Notion. Les identifiants se configurent côté serveur, via variables
         d&apos;environnement (jamais dans le navigateur).
       </p>
+
+      <Preferences />
 
       <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">

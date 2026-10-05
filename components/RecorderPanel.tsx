@@ -1,16 +1,37 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Download, Mic, MonitorUp, Square, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  CloudOff,
+  Download,
+  History,
+  Mic,
+  MonitorUp,
+  Square,
+  TriangleAlert,
+  Upload,
+} from "lucide-react";
 import type { Meeting } from "@/lib/types";
 import { useMeetings } from "@/lib/store";
+import { AUDIO_EXTENSIONS, IMPORT_ACCEPT, audioTypeOfFile } from "@/lib/audioTypes";
+import { fileBaseName } from "@/lib/meetingText";
+import { LiveUpload, getActiveUpload, type LiveUploadState } from "@/lib/liveUpload";
+import {
+  deleteBackup,
+  findBackups,
+  pruneOldBackups,
+  type Backup,
+} from "@/lib/recordingBackup";
 
 type RecorderState = "idle" | "requesting" | "recording" | "stopped" | "error";
-type UploadState = "idle" | "uploading" | "done" | "error";
+type ImportState = { phase: "uploading" | "error"; progress: number; error: string | null };
 type CaptureMode = "salle" | "proche";
 
 const MIC_STORAGE_KEY = "crmaster.micDeviceId";
 const MODE_STORAGE_KEY = "crmaster.captureMode";
+// Limite fixée par Nginx sur le serveur (client_max_body_size).
+const MAX_IMPORT_BYTES = 500 * 1024 * 1024;
 // En dessous de ce niveau RMS pendant QUIET_ALERT_SECONDS, on signale un micro trop faible.
 const QUIET_RMS = 0.004;
 const QUIET_ALERT_SECONDS = 15;
@@ -87,27 +108,59 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} Mo`;
 }
 
-function localFileName(meeting: Meeting, blob: Blob) {
-  const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-  const base = meeting.title
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^A-Za-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `${base || "reunion"}.${ext}`;
+
+function downloadName(meeting: Meeting, mimeType: string) {
+  const type = mimeType.split(";")[0];
+  return `${fileBaseName(meeting)}.${AUDIO_EXTENSIONS[type] ?? "webm"}`;
+}
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// Durée d'un fichier importé, lue par le navigateur (null si illisible ici : la
+// transcription fonctionnera quand même).
+function probeDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement("audio");
+    const finish = (value: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    const timeout = setTimeout(() => finish(null), 8000);
+    el.preload = "metadata";
+    el.onloadedmetadata = () => {
+      clearTimeout(timeout);
+      finish(Number.isFinite(el.duration) ? Math.round(el.duration) : null);
+    };
+    el.onerror = () => {
+      clearTimeout(timeout);
+      finish(null);
+    };
+    el.src = url;
+  });
 }
 
 // XMLHttpRequest plutôt que fetch : seul lui donne la progression de l'envoi, utile pour
-// un long enregistrement envoyé en 4G.
-function uploadAudio(
+// un gros fichier envoyé en 4G.
+function uploadFile(
   meetingId: string,
-  blob: Blob,
+  file: Blob,
+  type: string,
+  durationSec: number | null,
   onProgress: (ratio: number) => void
 ): Promise<Meeting> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/meetings/${meetingId}/audio`);
-    xhr.setRequestHeader("content-type", blob.type || "audio/webm");
+    const query = durationSec !== null ? `?durationSec=${durationSec}` : "";
+    xhr.open("POST", `/api/meetings/${meetingId}/audio${query}`);
+    xhr.setRequestHeader("content-type", type);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
@@ -121,14 +174,34 @@ function uploadAudio(
       if (xhr.status >= 200 && xhr.status < 300 && data.audio) {
         resolve(data as Meeting);
       } else if (xhr.status === 413) {
-        reject(new Error("Fichier trop volumineux pour le serveur."));
+        reject(new Error("Fichier trop volumineux pour le serveur (500 Mo maximum)."));
       } else {
-        reject(new Error(data.error || "Le serveur n'a pas accepté l'enregistrement. Reconnectez-vous puis réessayez."));
+        reject(
+          new Error(data.error || "Le serveur n'a pas accepté le fichier. Reconnectez-vous puis réessayez.")
+        );
       }
     };
     xhr.onerror = () => reject(new Error("Connexion perdue pendant l'envoi."));
-    xhr.send(blob);
+    xhr.send(file);
   });
+}
+
+function ProgressBar({ ratio, label }: { ratio: number; label: string }) {
+  const pct = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+  return (
+    <div>
+      <div className="mb-1 flex justify-between text-xs text-slate-500">
+        <span>{label}</span>
+        <span className="tabular-nums">{pct} %</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className="h-full rounded-full bg-brand-500 transition-[width] duration-200"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function SavedRecording({
@@ -145,7 +218,8 @@ function SavedRecording({
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="mb-1 text-base font-semibold text-slate-900">Enregistrement</h2>
       <p className="mb-4 text-sm text-slate-500">
-        Durée : {formatDuration(meeting.recordingDurationSec ?? 0)}
+        Durée :{" "}
+        {meeting.recordingDurationSec != null ? formatDuration(meeting.recordingDurationSec) : "—"}
         {meeting.audio && ` · ${formatSize(meeting.audio.sizeBytes)}`}
       </p>
       <audio controls preload="metadata" src={src} className="mb-4 w-full">
@@ -170,7 +244,7 @@ function SavedRecording({
             onClick={onReplace}
             className="ml-auto text-xs text-slate-400 hover:text-slate-600 hover:underline"
           >
-            Refaire l&apos;enregistrement
+            Refaire l&apos;enregistrement ou importer un fichier
           </button>
         )}
       </div>
@@ -179,17 +253,26 @@ function SavedRecording({
 }
 
 export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
-  const { updateMeeting, syncMeeting } = useMeetings();
+  const { updateMeeting, syncMeeting, replaceMeeting } = useMeetings();
   const [state, setState] = useState<RecorderState>("idle");
   const [seconds, setSeconds] = useState(0);
-  const [uploadState, setUploadState] = useState<UploadState>("idle");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [secureContext, setSecureContext] = useState(true);
   const [replacing, setReplacing] = useState(false);
+
+  // Envoi en direct de l'enregistrement en cours (ou qui vient de se terminer).
+  const [upload, setUpload] = useState<LiveUpload | null>(null);
+  const [uploadSnap, setUploadSnap] = useState<LiveUploadState | null>(null);
+  // Import d'un fichier audio existant.
+  const [importState, setImportState] = useState<ImportState | null>(null);
+  // Enregistrements interrompus : copie restée sur l'appareil, ou reçue par le serveur.
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [serverPartBytes, setServerPartBytes] = useState<{ session: string; size: number } | null>(
+    null
+  );
+  const [recovering, setRecovering] = useState(false);
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
@@ -198,15 +281,14 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
   const [tooQuiet, setTooQuiet] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const tracksToStopRef = useRef<MediaStreamTrack[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const meterRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const recordingRef = useRef(false);
-  const blobRef = useRef<Blob | null>(null);
   const secondsRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refreshDevices() {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -239,12 +321,37 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
     setLevel(0);
   }
 
+  async function refreshRecoverable(activeSession?: string) {
+    const local = (await findBackups(meeting.id)).filter((b) => b.session !== activeSession);
+    setBackups(local);
+    // Sans copie locale, le serveur a peut-être reçu une partie d'un enregistrement coupé
+    // (téléphone éteint en pleine réunion, enregistrement lancé sur un autre appareil…).
+    if (local.length === 0 && meeting.status === "enregistrement_en_cours" && !activeSession) {
+      try {
+        const res = await fetch(`/api/meetings/${meeting.id}/audio/live`);
+        const data = (await res.json()) as { parts?: { session: string; size: number }[] };
+        setServerPartBytes(data.parts?.[0] ?? null);
+      } catch {
+        // rien à proposer
+      }
+    }
+  }
+
   useEffect(() => {
     setSecureContext(window.isSecureContext && Boolean(navigator.mediaDevices));
     setDeviceId(readStored(MIC_STORAGE_KEY) ?? "");
     const storedMode = readStored(MODE_STORAGE_KEY);
     if (storedMode === "salle" || storedMode === "proche") setCaptureMode(storedMode);
     refreshDevices().catch(() => {});
+
+    // Envoi encore en cours d'un enregistrement fait avant de quitter puis revenir sur la page.
+    const running = getActiveUpload(meeting.id);
+    if (running) {
+      setUpload(running);
+      setState("stopped");
+      setAudioUrl(URL.createObjectURL(running.blob));
+    }
+    pruneOldBackups().finally(() => refreshRecoverable(running?.session));
 
     const onDeviceChange = () => refreshDevices().catch(() => {});
     navigator.mediaDevices?.addEventListener("devicechange", onDeviceChange);
@@ -260,7 +367,7 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (timerRef.current) clearInterval(timerRef.current);
       // Quitter la page en cours d'enregistrement (lien interne) : on arrête proprement,
-      // ce qui sauvegarde et envoie ce qui a été enregistré au lieu de le perdre.
+      // ce qui envoie la fin au serveur au lieu de la perdre.
       if (mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.stop();
       } else {
@@ -270,10 +377,23 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fermeture ou rechargement de l'onglet pendant l'enregistrement ou l'envoi : le
-  // navigateur demande confirmation.
   useEffect(() => {
-    const unsaved = state === "recording" || uploadState === "uploading" || uploadState === "error";
+    if (!upload) {
+      setUploadSnap(null);
+      return;
+    }
+    setUploadSnap(upload.snapshot);
+    return upload.subscribe(setUploadSnap);
+  }, [upload]);
+
+  // Fermeture ou rechargement de l'onglet pendant l'enregistrement ou un envoi : le
+  // navigateur demande confirmation.
+  const unsaved =
+    state === "recording" ||
+    uploadSnap?.phase === "finishing" ||
+    uploadSnap?.phase === "error" ||
+    importState?.phase === "uploading";
+  useEffect(() => {
     if (!unsaved) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -281,22 +401,20 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [state, uploadState]);
+  }, [unsaved]);
 
-  async function sendRecording() {
-    const blob = blobRef.current;
-    if (!blob) return;
-    setUploadState("uploading");
-    setUploadProgress(0);
-    setUploadError(null);
-    try {
-      const saved = await uploadAudio(meeting.id, blob, setUploadProgress);
-      syncMeeting(meeting.id, { audio: saved.audio });
-      setUploadState("done");
-    } catch (err) {
-      setUploadState("error");
-      setUploadError(err instanceof Error ? err.message : "Échec de l'envoi.");
-    }
+  // Le composant peut avoir été quitté entre-temps : la mise à jour passe par le magasin
+  // global des réunions, qui survit à la navigation.
+  function finishUpload(target: LiveUpload, durationSec?: number) {
+    target
+      .finish(durationSec)
+      .then((saved) => {
+        replaceMeeting(saved);
+        setReplacing(false);
+      })
+      .catch(() => {
+        // l'erreur est affichée via l'état de l'envoi
+      });
   }
 
   function startLevelMeter(stream: MediaStream, audioContext: AudioContext) {
@@ -396,35 +514,35 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
       recordingRef.current = true;
       acquireWakeLock();
 
-      chunksRef.current = [];
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, {
         ...(mimeType ? { mimeType } : {}),
         audioBitsPerSecond: 96000,
       });
+      const live = LiveUpload.start(meeting.id, recorder.mimeType || mimeType || "audio/webm");
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) live.push(e.data, secondsRef.current);
       };
       recorder.onstop = () => {
         if (timerRef.current) clearInterval(timerRef.current);
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        blobRef.current = blob;
-        setAudioUrl(URL.createObjectURL(blob));
         cleanupMedia();
+        setAudioUrl(URL.createObjectURL(live.blob));
         setState("stopped");
-        updateMeeting(meeting.id, {
+        // Affichage immédiat ; le serveur confirme quand l'envoi est terminé.
+        syncMeeting(meeting.id, {
           status: "enregistree",
           recordingDurationSec: secondsRef.current,
-          transcriptionStatus: "en_attente_outil",
         });
-        sendRecording();
+        finishUpload(live, secondsRef.current);
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start(1000);
+      setUpload(live);
       setSeconds(0);
       secondsRef.current = 0;
       setState("recording");
+      setServerPartBytes(null);
       updateMeeting(meeting.id, { status: "enregistrement_en_cours" });
 
       timerRef.current = setInterval(() => {
@@ -442,109 +560,96 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
     }
   }
 
-  // La suite (sauvegarde, envoi au serveur) est gérée par recorder.onstop.
+  // La suite (envoi de la fin au serveur) est gérée par recorder.onstop.
   function stopRecording() {
     mediaRecorderRef.current?.stop();
   }
 
-  if (state === "idle" && meeting.audio && !replacing) {
-    return (
-      <SavedRecording
-        meeting={meeting}
-        justSaved={false}
-        onReplace={() => {
-          if (
-            window.confirm(
-              "Un nouvel enregistrement remplacera l'audio actuel de cette réunion. Continuer ?"
-            )
-          ) {
-            setReplacing(true);
-          }
-        }}
-      />
-    );
+  async function handleImport(file: File) {
+    const type = audioTypeOfFile(file);
+    if (!type) {
+      setImportState({
+        phase: "error",
+        progress: 0,
+        error: "Format non reconnu. Formats acceptés : mp3, m4a, wav, webm, ogg, aac, flac, mp4.",
+      });
+      return;
+    }
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportState({
+        phase: "error",
+        progress: 0,
+        error: "Fichier trop volumineux (500 Mo maximum).",
+      });
+      return;
+    }
+    setImportState({ phase: "uploading", progress: 0, error: null });
+    const durationSec = await probeDuration(file);
+    try {
+      const saved = await uploadFile(meeting.id, file, type, durationSec, (progress) =>
+        setImportState({ phase: "uploading", progress, error: null })
+      );
+      replaceMeeting(saved);
+      setImportState(null);
+      setReplacing(false);
+    } catch (err) {
+      setImportState({
+        phase: "error",
+        progress: 0,
+        error: err instanceof Error ? err.message : "Échec de l'envoi.",
+      });
+    }
   }
 
-  if (state === "idle" || state === "requesting" || state === "error") {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 text-white">
-            {meeting.type === "presentiel" ? <Mic size={18} /> : <MonitorUp size={18} />}
-          </div>
-          <h2 className="text-base font-semibold text-slate-900">Enregistrement</h2>
-        </div>
-        <p className="mb-4 text-sm text-slate-500">
-          {meeting.type === "presentiel"
-            ? "Posez l'appareil à plat, au centre de la table, à égale distance des participants : c'est ce qui compte le plus pour distinguer les voix."
-            : "Partagez la fenêtre de Teams/Zoom (ou tout l'écran) et cochez « Partager l'audio du système » — votre micro est capturé en parallèle pour garder les deux côtés de la conversation. Sur macOS, le son système n'est pas capturable par le navigateur : seul votre micro sera enregistré, sauf pilote audio virtuel (ex. BlackHole)."}
-        </p>
-
-        {!secureContext ? (
-          <p className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-            L&apos;accès au micro exige une connexion sécurisée (adresse en https://). Ouvrez
-            l&apos;application via son adresse HTTPS pour enregistrer.
-          </p>
-        ) : (
-          <div className="mb-4 grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Micro</label>
-              <select
-                value={deviceId}
-                onChange={(e) => {
-                  setDeviceId(e.target.value);
-                  writeStored(MIC_STORAGE_KEY, e.target.value);
-                }}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="">Micro par défaut de l&apos;appareil</option>
-                {devices.map((d, i) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Micro ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {meeting.type === "presentiel" && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Captation</label>
-                <select
-                  value={captureMode}
-                  onChange={(e) => {
-                    const mode = e.target.value as CaptureMode;
-                    setCaptureMode(mode);
-                    writeStored(MODE_STORAGE_KEY, mode);
-                  }}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                >
-                  <option value="salle">Salle — plusieurs personnes (recommandé)</option>
-                  <option value="proche">Voix proche — lieu bruyant</option>
-                </select>
-              </div>
-            )}
-          </div>
-        )}
-
-        {error && (
-          <p className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-            {error}
-          </p>
-        )}
-        <button
-          onClick={startRecording}
-          disabled={state === "requesting" || !secureContext}
-          className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-brand-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
-        >
-          <span className="h-2.5 w-2.5 rounded-full bg-white" />
-          {state === "requesting" ? "Autorisation en cours…" : "Démarrer l'enregistrement"}
-        </button>
-      </div>
-    );
+  async function recoverLocal(backup: Backup) {
+    setRecovering(true);
+    try {
+      const resumed = await LiveUpload.resume(backup);
+      setBackups((prev) => prev.filter((b) => b.session !== backup.session));
+      setUpload(resumed);
+      setAudioUrl(URL.createObjectURL(resumed.blob));
+      setState("stopped");
+      finishUpload(resumed);
+    } finally {
+      setRecovering(false);
+    }
   }
+
+  async function discardLocal(backup: Backup) {
+    if (!window.confirm("Supprimer définitivement cette copie de l'enregistrement ?")) return;
+    await deleteBackup(backup.session);
+    setBackups((prev) => prev.filter((b) => b.session !== backup.session));
+  }
+
+  async function recoverServer() {
+    if (!serverPartBytes) return;
+    setRecovering(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/meetings/${meeting.id}/audio/live?session=${serverPartBytes.session}`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.audio) throw new Error(data.error || "Récupération impossible.");
+      replaceMeeting(data as Meeting);
+      setServerPartBytes(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Récupération impossible.");
+    } finally {
+      setRecovering(false);
+    }
+  }
+
+  function ignoreServerPart() {
+    setServerPartBytes(null);
+    updateMeeting(meeting.id, { status: meeting.audio ? "enregistree" : "planifiee" });
+  }
+
+  // ——— Affichage ———
 
   if (state === "recording") {
+    const behind = uploadSnap ? uploadSnap.totalBytes - uploadSnap.sentBytes : 0;
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50/50 p-6 shadow-sm">
         <div className="mb-4 flex items-center gap-3">
@@ -576,6 +681,27 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
           </div>
         </div>
 
+        {uploadSnap && (
+          <p
+            className={`mb-4 flex items-start gap-2 text-xs ${
+              uploadSnap.online ? "text-emerald-700" : "text-amber-700"
+            }`}
+          >
+            {uploadSnap.online ? (
+              <>
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+                Sauvegarde en direct sur le serveur · {formatSize(uploadSnap.sentBytes)} envoyés
+              </>
+            ) : (
+              <>
+                <CloudOff size={14} className="mt-0.5 shrink-0" />
+                Serveur injoignable : l&apos;enregistrement continue et une copie est gardée sur
+                cet appareil ({formatSize(behind)} en attente). L&apos;envoi reprendra tout seul.
+              </>
+            )}
+          </p>
+        )}
+
         {tooQuiet && (
           <p className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <TriangleAlert size={14} className="mt-0.5 shrink-0" />
@@ -589,10 +715,6 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
             {warning}
           </p>
         )}
-        <p className="mb-4 text-xs text-slate-500">
-          Gardez cette page ouverte jusqu&apos;à la fin : l&apos;audio est envoyé au serveur dès
-          l&apos;arrêt de l&apos;enregistrement.
-        </p>
         <button
           onClick={stopRecording}
           className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
@@ -604,66 +726,289 @@ export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
     );
   }
 
-  if (uploadState === "done") {
-    return <SavedRecording meeting={meeting} justSaved />;
+  // Fin d'un enregistrement : envoi du reste puis confirmation du serveur.
+  if (upload && uploadSnap && uploadSnap.phase !== "done") {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-1 text-base font-semibold text-slate-900">Enregistrement terminé</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          {meeting.recordingDurationSec != null &&
+            `Durée : ${formatDuration(meeting.recordingDurationSec)} · `}
+          {formatSize(uploadSnap.totalBytes)}
+        </p>
+        {audioUrl && (
+          <audio controls src={audioUrl} className="mb-4 w-full">
+            Votre navigateur ne supporte pas la lecture audio.
+          </audio>
+        )}
+
+        {uploadSnap.phase === "error" ? (
+          <div>
+            <p className="mb-3 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+              <span>
+                {uploadSnap.error} L&apos;audio n&apos;est pas encore sur le serveur, mais une
+                copie est gardée sur cet appareil : vous pourrez le récupérer en revenant sur
+                cette réunion.
+              </span>
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                onClick={() => finishUpload(upload)}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+              >
+                Réessayer l&apos;envoi
+              </button>
+              {audioUrl && (
+                <a
+                  href={audioUrl}
+                  download={downloadName(meeting, upload.mimeType)}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline"
+                >
+                  <Download size={15} />
+                  Télécharger une copie
+                </a>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div>
+            <ProgressBar
+              ratio={uploadSnap.totalBytes ? uploadSnap.sentBytes / uploadSnap.totalBytes : 0}
+              label={uploadSnap.online ? "Envoi de la fin de l'enregistrement…" : "Serveur injoignable, nouvel essai…"}
+            />
+            <p className="mt-2 text-xs text-slate-400">
+              Restez sur cette page jusqu&apos;à la fin de l&apos;envoi.
+            </p>
+          </div>
+        )}
+      </div>
+    );
   }
+
+  if (importState?.phase === "uploading") {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-4 text-base font-semibold text-slate-900">Import du fichier audio</h2>
+        <ProgressBar ratio={importState.progress} label="Envoi vers le serveur…" />
+        <p className="mt-2 text-xs text-slate-400">Ne fermez pas cette page avant la fin.</p>
+      </div>
+    );
+  }
+
+  if (meeting.audio && !replacing && state !== "requesting" && state !== "error") {
+    return (
+      <SavedRecording
+        meeting={meeting}
+        justSaved={uploadSnap?.phase === "done"}
+        onReplace={() => {
+          if (
+            window.confirm(
+              "Un nouvel enregistrement ou un fichier importé remplacera l'audio actuel, ainsi que sa transcription et son compte rendu. Continuer ?"
+            )
+          ) {
+            setReplacing(true);
+          }
+        }}
+      />
+    );
+  }
+
+  const busy = state === "requesting" || recovering;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-1 text-base font-semibold text-slate-900">Enregistrement terminé</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Durée : {formatDuration(meeting.recordingDurationSec ?? seconds)}
-        {blobRef.current && ` · ${formatSize(blobRef.current.size)}`}
-      </p>
-      {audioUrl && (
-        <audio controls src={audioUrl} className="mb-4 w-full">
-          Votre navigateur ne supporte pas la lecture audio.
-        </audio>
-      )}
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+          {meeting.type === "presentiel" ? <Mic size={18} /> : <MonitorUp size={18} />}
+        </div>
+        <h2 className="text-base font-semibold text-slate-900">Enregistrement</h2>
+        {replacing && (
+          <button
+            onClick={() => setReplacing(false)}
+            className="ml-auto text-xs text-slate-400 hover:text-slate-600 hover:underline"
+          >
+            Annuler
+          </button>
+        )}
+      </div>
 
-      {uploadState === "error" ? (
-        <div>
-          <p className="mb-3 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+      {backups.map((b) => (
+        <div key={b.session} className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-3 flex items-start gap-2 text-sm text-amber-800">
+            <History size={16} className="mt-0.5 shrink-0" />
             <span>
-              {uploadError} L&apos;audio n&apos;est pas encore sauvegardé : ne quittez pas cette
-              page sans l&apos;avoir envoyé ou téléchargé.
+              Un enregistrement interrompu ({formatDuration(b.durationSec)} ·{" "}
+              {formatSize(b.sizeBytes)}, le{" "}
+              {new Date(b.updatedAt).toLocaleString("fr-FR", {
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              ) est conservé sur cet appareil mais n&apos;a pas été entièrement envoyé.
             </span>
           </p>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={sendRecording}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+              onClick={() => recoverLocal(b)}
+              disabled={busy}
+              className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
             >
-              Réessayer l&apos;envoi
+              Récupérer et envoyer
             </button>
-            {audioUrl && blobRef.current && (
-              <a
-                href={audioUrl}
-                download={localFileName(meeting, blobRef.current)}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline"
-              >
-                <Download size={15} />
-                Télécharger une copie
-              </a>
-            )}
+            <button
+              onClick={() =>
+                saveBlob(new Blob(b.chunks, { type: b.mimeType }), downloadName(meeting, b.mimeType))
+              }
+              className="text-xs font-medium text-brand-600 hover:underline"
+            >
+              Télécharger
+            </button>
+            <button
+              onClick={() => discardLocal(b)}
+              className="text-xs text-slate-500 hover:text-red-600 hover:underline"
+            >
+              Supprimer la copie
+            </button>
           </div>
         </div>
-      ) : (
-        <div>
-          <div className="mb-1 flex justify-between text-xs text-slate-500">
-            <span>Envoi vers le serveur…</span>
-            <span className="tabular-nums">{Math.round(uploadProgress * 100)} %</span>
+      ))}
+
+      {serverPartBytes && backups.length === 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-3 flex items-start gap-2 text-sm text-amber-800">
+            <History size={16} className="mt-0.5 shrink-0" />
+            <span>
+              L&apos;enregistrement de cette réunion a été interrompu. Le serveur en a reçu{" "}
+              {formatSize(serverPartBytes.size)} : vous pouvez récupérer cette partie.
+            </span>
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={recoverServer}
+              disabled={busy}
+              className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              Récupérer
+            </button>
+            <button
+              onClick={ignoreServerPart}
+              className="text-xs text-slate-500 hover:text-slate-700 hover:underline"
+            >
+              Ignorer
+            </button>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-            <div
-              className="h-full rounded-full bg-brand-500 transition-[width] duration-200"
-              style={{ width: `${Math.round(uploadProgress * 100)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-slate-400">Ne fermez pas cette page avant la fin.</p>
         </div>
       )}
+
+      {meeting.audioDeletedAt && !meeting.audio && (
+        <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          L&apos;audio de cette réunion a été supprimé automatiquement le{" "}
+          {new Date(meeting.audioDeletedAt).toLocaleDateString("fr-FR")} (durée de conservation
+          dépassée). La transcription et le compte rendu sont conservés.
+        </p>
+      )}
+
+      <p className="mb-4 text-sm text-slate-500">
+        {meeting.type === "presentiel"
+          ? "Posez l'appareil à plat, au centre de la table, à égale distance des participants : c'est ce qui compte le plus pour distinguer les voix."
+          : "Partagez la fenêtre de Teams/Zoom (ou tout l'écran) et cochez « Partager l'audio du système » — votre micro est capturé en parallèle pour garder les deux côtés de la conversation. Sur macOS, le son système n'est pas capturable par le navigateur : seul votre micro sera enregistré, sauf pilote audio virtuel (ex. BlackHole)."}
+      </p>
+
+      {!secureContext ? (
+        <p className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+          L&apos;accès au micro exige une connexion sécurisée (adresse en https://). Ouvrez
+          l&apos;application via son adresse HTTPS pour enregistrer — l&apos;import de fichier
+          fonctionne en attendant.
+        </p>
+      ) : (
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Micro</label>
+            <select
+              value={deviceId}
+              onChange={(e) => {
+                setDeviceId(e.target.value);
+                writeStored(MIC_STORAGE_KEY, e.target.value);
+              }}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            >
+              <option value="">Micro par défaut de l&apos;appareil</option>
+              {devices.map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Micro ${i + 1}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          {meeting.type === "presentiel" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Captation</label>
+              <select
+                value={captureMode}
+                onChange={(e) => {
+                  const mode = e.target.value as CaptureMode;
+                  setCaptureMode(mode);
+                  writeStored(MODE_STORAGE_KEY, mode);
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="salle">Salle — plusieurs personnes (recommandé)</option>
+                <option value="proche">Voix proche — lieu bruyant</option>
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+          {error}
+        </p>
+      )}
+      {importState?.phase === "error" && (
+        <p className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+          {importState.error}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={startRecording}
+          disabled={busy || !secureContext}
+          className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-brand-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+        >
+          <span className="h-2.5 w-2.5 rounded-full bg-white" />
+          {state === "requesting" ? "Autorisation en cours…" : "Démarrer l'enregistrement"}
+        </button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy}
+          className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+        >
+          <Upload size={15} />
+          Importer un fichier audio
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={IMPORT_ACCEPT}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) handleImport(file);
+          }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        Import : enregistrement Teams/Zoom (mp4), mémo vocal, dictaphone… (mp3, m4a, wav, ogg,
+        webm, aac, flac — 500 Mo max).
+      </p>
     </div>
   );
 }

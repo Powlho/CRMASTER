@@ -1,12 +1,17 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, Clock, Plus, Sparkles } from "lucide-react";
+import { CalendarClock, Clock, Plus, Search, Sparkles, X } from "lucide-react";
 import { useMeetings } from "@/lib/store";
+import { searchMeetings } from "@/lib/search";
 import MeetingCard from "@/components/MeetingCard";
 
 export default function DashboardPage() {
   const { meetings, ready } = useMeetings();
+  const [query, setQuery] = useState("");
+  const hits = useMemo(() => searchMeetings(meetings, query), [meetings, query]);
+  const searching = query.trim().length > 0;
 
   const upcoming = meetings.filter((m) => m.status === "planifiee");
   const inProgress = meetings.filter(
@@ -49,8 +54,48 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {ready && meetings.length > 0 && (
+        <div className="relative mb-8">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+          <input
+            type="text"
+            inputMode="search"
+            aria-label="Rechercher"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Rechercher dans les titres, participants, comptes rendus et transcriptions…"
+            className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-9 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          {searching && (
+            <button
+              onClick={() => setQuery("")}
+              aria-label="Effacer la recherche"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      )}
+
       {!ready ? (
         <p className="text-sm text-slate-400">Chargement…</p>
+      ) : searching ? (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+            {hits.length === 0
+              ? "Aucun résultat"
+              : `${hits.length} résultat${hits.length > 1 ? "s" : ""}`}
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {hits.map((hit) => (
+              <MeetingCard key={hit.meeting.id} meeting={hit.meeting} snippet={hit.snippet} />
+            ))}
+          </div>
+        </section>
       ) : meetings.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-violet-500 text-white">

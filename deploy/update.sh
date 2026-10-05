@@ -17,4 +17,10 @@ npm run build
 echo "==> Redémarrage"
 pm2 restart crmaster
 
+# Sauvegarde nocturne (programmée une fois, si le script tourne en root).
+if [[ $EUID -eq 0 && ! -f /etc/cron.d/crmaster-backup ]]; then
+  echo "==> Programmation de la sauvegarde nocturne"
+  bash deploy/install-backup.sh
+fi
+
 echo "==> Terminé."

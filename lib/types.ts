@@ -44,10 +44,14 @@ export interface Meeting {
   recordingDurationSec: number | null;
   createdAt: string;
   audio?: MeetingAudio;
+  /** Date de suppression automatique de l'audio (durée de conservation dépassée). */
+  audioDeletedAt?: string;
   assemblyTranscriptId?: string;
   transcriptText?: string;
   transcriptSummary?: string;
   transcriptUtterances?: TranscriptUtterance[];
+  /** Noms donnés aux intervenants détectés : { "A": "Marie", "B": "Jean" }. */
+  speakerNames?: Record<string, string>;
   formattedReport?: string;
   notionPageUrl?: string;
 }

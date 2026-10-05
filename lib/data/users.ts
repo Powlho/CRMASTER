@@ -10,6 +10,8 @@ export interface StoredUser {
   passwordHash: string;
   role: UserRole;
   notionEnabled: boolean;
+  /** true = le compte rendu attend une relecture avant l'envoi vers Notion. */
+  notionReview?: boolean;
   createdAt: string;
 }
 
@@ -18,6 +20,7 @@ export interface PublicUser {
   username: string;
   role: UserRole;
   notionEnabled: boolean;
+  notionReview: boolean;
   createdAt: string;
 }
 
@@ -62,6 +65,7 @@ export function toPublicUser(user: StoredUser): PublicUser {
     username: user.username,
     role: user.role,
     notionEnabled: user.notionEnabled,
+    notionReview: Boolean(user.notionReview),
     createdAt: user.createdAt,
   };
 }
@@ -138,7 +142,12 @@ export async function createUser(input: {
 
 export async function updateUser(
   id: string,
-  patch: Partial<{ password: string; role: UserRole; notionEnabled: boolean }>
+  patch: Partial<{
+    password: string;
+    role: UserRole;
+    notionEnabled: boolean;
+    notionReview: boolean;
+  }>
 ): Promise<StoredUser | undefined> {
   const users = await readAll();
   const index = users.findIndex((u) => u.id === id);
@@ -148,6 +157,7 @@ export async function updateUser(
   if (patch.password) updated.passwordHash = await hashPassword(patch.password);
   if (patch.role) updated.role = patch.role;
   if (patch.notionEnabled !== undefined) updated.notionEnabled = patch.notionEnabled;
+  if (patch.notionReview !== undefined) updated.notionReview = patch.notionReview;
   users[index] = updated;
   await writeAll(users);
   return updated;

@@ -16,6 +16,7 @@ interface MeetingsContextValue {
   createMeeting: (input: NewMeetingInput) => Promise<Meeting>;
   updateMeeting: (id: string, patch: Partial<Meeting>) => void;
   syncMeeting: (id: string, patch: Partial<Meeting>) => void;
+  replaceMeeting: (meeting: Meeting) => void;
   setStatus: (id: string, status: MeetingStatus) => void;
   getMeeting: (id: string) => Meeting | undefined;
   deleteMeeting: (id: string) => void;
@@ -50,13 +51,19 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     fetch(`/api/meetings/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
+      // undefined (champ à effacer) disparaîtrait du JSON : on l'envoie comme null.
+      body: JSON.stringify(patch, (_key, value) => (value === undefined ? null : value)),
     }).catch(() => {});
   }, []);
 
   // Applique localement des champs déjà enregistrés par le serveur, sans renvoyer de PATCH.
   const syncMeeting = useCallback((id: string, patch: Partial<Meeting>) => {
     setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }, []);
+
+  // Remplace la réunion par la version renvoyée par le serveur (champs effacés compris).
+  const replaceMeeting = useCallback((meeting: Meeting) => {
+    setMeetings((prev) => prev.map((m) => (m.id === meeting.id ? meeting : m)));
   }, []);
 
   const setStatus = useCallback(
@@ -81,11 +88,22 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       createMeeting,
       updateMeeting,
       syncMeeting,
+      replaceMeeting,
       setStatus,
       getMeeting,
       deleteMeeting,
     }),
-    [meetings, ready, createMeeting, updateMeeting, syncMeeting, setStatus, getMeeting, deleteMeeting]
+    [
+      meetings,
+      ready,
+      createMeeting,
+      updateMeeting,
+      syncMeeting,
+      replaceMeeting,
+      setStatus,
+      getMeeting,
+      deleteMeeting,
+    ]
   );
 
   return (

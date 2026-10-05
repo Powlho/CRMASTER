@@ -115,3 +115,26 @@ export function migrateOwnerlessMeetings(ownerId: string): Promise<void> {
     return { result: undefined, changed };
   });
 }
+
+export async function listAllMeetings(): Promise<Meeting[]> {
+  return readAll();
+}
+
+/**
+ * Retire l'audio des réunions dont l'enregistrement date d'avant `cutoff` (transcriptions et
+ * comptes rendus conservés). Renvoie les ids concernés, dont il faut supprimer les fichiers.
+ */
+export function detachExpiredAudio(cutoff: string): Promise<string[]> {
+  return mutate((meetings) => {
+    const expired: string[] = [];
+    const now = new Date().toISOString();
+    for (const m of meetings) {
+      if (m.audio && m.audio.savedAt < cutoff) {
+        delete m.audio;
+        m.audioDeletedAt = now;
+        expired.push(m.id);
+      }
+    }
+    return { result: expired, changed: expired.length > 0 };
+  });
+}

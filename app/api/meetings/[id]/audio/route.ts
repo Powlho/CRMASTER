@@ -4,8 +4,15 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream as NodeReadableStream } from "stream/web";
 import { getMeetingById, patchMeeting } from "@/lib/data/store";
-import { AUDIO_EXTENSIONS, audioPath, ensureAudioDir, normalizeAudioType } from "@/lib/data/audio";
-import type { Meeting } from "@/lib/types";
+import {
+  AUDIO_EXTENSIONS,
+  audioPath,
+  ensureAudioDir,
+  newAudioPatch,
+  normalizeAudioType,
+  parseDuration,
+} from "@/lib/data/audio";
+import { fileBaseName } from "@/lib/meetingText";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +26,6 @@ async function findOwnedMeeting(req: NextRequest, id: string) {
     return { error: NextResponse.json({ error: "Introuvable." }, { status: 404 }) };
   }
   return { meeting, userId };
-}
-
-function downloadName(meeting: Meeting, ext: string): string {
-  const base = `${meeting.date}-${meeting.title}`
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^A-Za-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return `${base || "reunion"}.${ext}`;
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -46,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   await ensureAudioDir();
   const finalPath = audioPath(meeting.id);
-  const tmpPath = `${finalPath}.part`;
+  const tmpPath = `${finalPath}.upload`;
 
   // Écriture en flux vers un fichier temporaire, renommé seulement une fois complet :
   // un envoi interrompu ne remplace jamais un enregistrement déjà sauvegardé.
@@ -67,9 +64,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   await fs.rename(tmpPath, finalPath);
 
-  const updated = await patchMeeting(meeting.id, userId, {
-    audio: { mimeType: type, sizeBytes: size, savedAt: new Date().toISOString() },
-  });
+  const updated = await patchMeeting(
+    meeting.id,
+    userId,
+    newAudioPatch(
+      { mimeType: type, sizeBytes: size, savedAt: new Date().toISOString() },
+      parseDuration(req.nextUrl.searchParams.get("durationSec"))
+    )
+  );
   return NextResponse.json(updated);
 }
 
@@ -99,7 +101,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (req.nextUrl.searchParams.get("download") === "1") {
     headers.set(
       "Content-Disposition",
-      `attachment; filename="${downloadName(meeting, ext ?? "bin")}"`
+      `attachment; filename="${fileBaseName(meeting)}.${ext ?? "bin"}"`
     );
   }
 

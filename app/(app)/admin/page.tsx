@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Shield, Trash2 } from "lucide-react";
+import { Database, Download, HardDrive, Plus, Shield, Trash2 } from "lucide-react";
 import { useCurrentUser } from "@/lib/useCurrentUser";
 
 interface AdminUser {
@@ -92,7 +92,143 @@ export default function AdminPage() {
           </table>
         </div>
       )}
+
+      <StorageSection />
     </div>
+  );
+}
+
+const RETENTION_LABELS: Record<number, string> = {
+  0: "Indéfiniment",
+  30: "30 jours",
+  60: "60 jours",
+  90: "3 mois",
+  180: "6 mois",
+  365: "1 an",
+};
+
+interface StorageInfo {
+  settings: { audioRetentionDays: number };
+  usage: { files: number; bytes: number; diskFreeBytes: number | null };
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1).replace(".", ",")} Go`;
+  return `${Math.round(bytes / 1024 ** 2)} Mo`;
+}
+
+function StorageSection() {
+  const [info, setInfo] = useState<StorageInfo | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.settings) setInfo(data);
+      })
+      .catch(() => setError("Impossible de lire les réglages."));
+  }, []);
+
+  async function changeRetention(days: number) {
+    if (
+      days > 0 &&
+      !window.confirm(
+        `Les fichiers audio de plus de ${RETENTION_LABELS[days]} seront supprimés définitivement, dès maintenant puis automatiquement. Les transcriptions et comptes rendus sont conservés. Continuer ?`
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ audioRetentionDays: days }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Échec de l'enregistrement.");
+        return;
+      }
+      setInfo({ settings: data.settings, usage: data.usage });
+      setMessage(
+        data.report.deletedAudio > 0
+          ? `Réglage enregistré : ${data.report.deletedAudio} fichier(s) audio supprimé(s).`
+          : "Réglage enregistré."
+      );
+    } catch {
+      setError("Impossible de contacter le serveur.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-1 flex items-center gap-2.5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+          <HardDrive size={15} />
+        </div>
+        <h2 className="text-base font-semibold text-slate-900">Stockage et sauvegarde</h2>
+      </div>
+
+      {info && (
+        <p className="mb-5 text-sm text-slate-500">
+          {info.usage.files} enregistrement(s) audio · {formatBytes(info.usage.bytes)}
+          {info.usage.diskFreeBytes !== null &&
+            ` · ${formatBytes(info.usage.diskFreeBytes)} libres sur le serveur`}
+        </p>
+      )}
+
+      <div className="mb-6">
+        <label className="mb-1 block text-sm font-medium text-slate-700">
+          Conservation des fichiers audio
+        </label>
+        <p className="mb-2 text-xs text-slate-500">
+          Passé ce délai, l&apos;audio est supprimé automatiquement (la transcription et le
+          compte rendu restent). Moins on garde d&apos;enregistrements de voix, mieux c&apos;est
+          pour la vie privée des participants (RGPD) — et pour l&apos;espace disque.
+        </p>
+        <select
+          value={info?.settings.audioRetentionDays ?? 0}
+          disabled={!info || saving}
+          onChange={(e) => changeRetention(Number(e.target.value))}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          {Object.entries(RETENTION_LABELS).map(([days, label]) => (
+            <option key={days} value={days}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {message && <p className="mt-2 text-xs text-emerald-600">{message}</p>}
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      </div>
+
+      <div>
+        <p className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+          <Database size={14} />
+          Sauvegarde
+        </p>
+        <p className="mb-2 text-xs text-slate-500">
+          Le serveur garde chaque nuit une copie des réunions (30 derniers jours). Pour une
+          copie hors du serveur, téléchargez de temps en temps toutes les réunions,
+          transcriptions et comptes rendus (sans les fichiers audio).
+        </p>
+        <a
+          href="/api/admin/backup"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <Download size={14} />
+          Télécharger une sauvegarde
+        </a>
+      </div>
+    </section>
   );
 }
 

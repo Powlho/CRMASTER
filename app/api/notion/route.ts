@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
     participants: string;
     summary: string | null;
     transcript: string;
+    /** speaker = nom affiché (« Marie » ou « Intervenant A »), déjà résolu par le client. */
     utterances: { speaker: string; text: string }[] | null;
     formattedReport: string | null;
     formattedReportLabel: string | null;
@@ -73,7 +74,10 @@ export async function POST(req: NextRequest) {
     "content-type": "application/json",
   };
 
-  const dbRes = await fetch(`${NOTION_BASE}/databases/${databaseId}`, { headers });
+  const dbRes = await fetch(`${NOTION_BASE}/databases/${databaseId}`, {
+    headers,
+    cache: "no-store",
+  });
   if (!dbRes.ok) {
     return NextResponse.json(
       {
@@ -124,7 +128,7 @@ export async function POST(req: NextRequest) {
   blocks.push(heading("Transcription complète"));
   const transcriptText =
     body.utterances && body.utterances.length > 0
-      ? body.utterances.map((u) => `Intervenant ${u.speaker} : ${u.text}`).join("\n\n")
+      ? body.utterances.map((u) => `${u.speaker} : ${u.text}`).join("\n\n")
       : body.transcript;
   for (const chunk of chunkText(transcriptText)) blocks.push(paragraph(chunk));
 

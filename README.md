@@ -15,6 +15,21 @@ Copiez `.env.example` en `.env.local` et renseignez :
 Détails pas à pas dans la page **Paramètres** de l'application. Les réunions sont stockées
 côté serveur dans `DATA_DIR` (par défaut `./data`, en JSON, un fichier par compte n'est pas
 nécessaire : chaque réunion est rattachée à son propriétaire) — ce dossier n'est jamais commit.
+Les fichiers audio sont dans `DATA_DIR/audio` ; leur durée de conservation se règle dans
+**Administration** (suppression automatique, transcriptions conservées).
+
+### Enregistrement fiable
+
+Pendant l'enregistrement, l'audio est envoyé au serveur toutes les 5 secondes et copié sur
+l'appareil (IndexedDB). Réseau coupé, onglet fermé ou téléphone éteint : l'enregistrement
+interrompu se récupère en rouvrant la réunion (depuis l'appareil, ou depuis ce que le serveur
+a déjà reçu).
+
+### Sauvegarde
+
+`deploy/install-backup.sh` (lancé automatiquement par `setup-vps.sh` et `update.sh` en root)
+programme une sauvegarde nocturne des données JSON dans `/var/backups/crmaster` (30 jours).
+Une copie hors serveur se télécharge depuis la page **Administration**.
 
 ### Mettre à jour une instance déjà déployée
 
@@ -60,7 +75,7 @@ régulier sans délai de réveil.
    (Let's Encrypt) si vous avez déjà un nom de domaine pointant vers le VPS.
 4. Pour les mises à jour suivantes (après un nouveau push) :
    ```bash
-   cd /opt/crmaster && bash deploy/update.sh
+   cd /opt/crmaster && sudo bash deploy/update.sh
    ```
 
 Le script ne touche jamais à la configuration SSH (pas de désactivation de l'auth par mot de

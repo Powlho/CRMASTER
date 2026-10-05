@@ -96,6 +96,9 @@ pm2 start npm --name crmaster -- start
 pm2 save
 pm2 startup systemd -u root --hp /root | tail -n 1 | bash || true
 
+echo "==> Sauvegarde nocturne des données"
+bash "$APP_DIR/deploy/install-backup.sh"
+
 echo "==> Configuration Nginx (reverse proxy vers le port 3000)"
 cat > /etc/nginx/sites-available/crmaster <<NGINX
 server {
