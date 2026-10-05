@@ -20,6 +20,12 @@ export interface TranscriptUtterance {
   text: string;
 }
 
+export interface MeetingAudio {
+  mimeType: string;
+  sizeBytes: number;
+  savedAt: string;
+}
+
 export interface Meeting {
   id: string;
   userId: string;
@@ -37,6 +43,7 @@ export interface Meeting {
   notionStatus: NotionStatus;
   recordingDurationSec: number | null;
   createdAt: string;
+  audio?: MeetingAudio;
   assemblyTranscriptId?: string;
   transcriptText?: string;
   transcriptSummary?: string;

@@ -15,6 +15,7 @@ interface MeetingsContextValue {
   ready: boolean;
   createMeeting: (input: NewMeetingInput) => Promise<Meeting>;
   updateMeeting: (id: string, patch: Partial<Meeting>) => void;
+  syncMeeting: (id: string, patch: Partial<Meeting>) => void;
   setStatus: (id: string, status: MeetingStatus) => void;
   getMeeting: (id: string) => Meeting | undefined;
   deleteMeeting: (id: string) => void;
@@ -53,6 +54,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  // Applique localement des champs déjà enregistrés par le serveur, sans renvoyer de PATCH.
+  const syncMeeting = useCallback((id: string, patch: Partial<Meeting>) => {
+    setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }, []);
+
   const setStatus = useCallback(
     (id: string, status: MeetingStatus) => updateMeeting(id, { status }),
     [updateMeeting]
@@ -74,11 +80,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       ready,
       createMeeting,
       updateMeeting,
+      syncMeeting,
       setStatus,
       getMeeting,
       deleteMeeting,
     }),
-    [meetings, ready, createMeeting, updateMeeting, setStatus, getMeeting, deleteMeeting]
+    [meetings, ready, createMeeting, updateMeeting, syncMeeting, setStatus, getMeeting, deleteMeeting]
   );
 
   return (

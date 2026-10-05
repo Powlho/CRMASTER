@@ -45,8 +45,14 @@ async function readAll(): Promise<StoredUser[]> {
   }
 }
 
+// Écriture atomique : une connexion qui lirait ce fichier pendant une écriture le croirait
+// vide, et ensureBootstrapAdmin recréerait alors un admin en écrasant tous les comptes.
 function writeAll(users: StoredUser[]): Promise<void> {
-  writeQueue = writeQueue.then(() => fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), "utf-8"));
+  const tmp = `${USERS_FILE}.tmp`;
+  writeQueue = writeQueue.then(async () => {
+    await fs.writeFile(tmp, JSON.stringify(users, null, 2), "utf-8");
+    await fs.rename(tmp, USERS_FILE);
+  });
   return writeQueue as Promise<void>;
 }
 

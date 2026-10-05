@@ -5,7 +5,7 @@ import type { Meeting, NewMeetingInput } from "@/lib/types";
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "meetings.json");
 
-let writeQueue: Promise<unknown> = Promise.resolve();
+let queue: Promise<unknown> = Promise.resolve();
 
 async function ensureFile(): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -26,11 +26,26 @@ async function readAll(): Promise<Meeting[]> {
   }
 }
 
-function writeAll(meetings: Meeting[]): Promise<void> {
-  writeQueue = writeQueue.then(() =>
-    fs.writeFile(DATA_FILE, JSON.stringify(meetings, null, 2), "utf-8")
-  );
-  return writeQueue as Promise<void>;
+// Écriture atomique (fichier temporaire puis renommage) : une lecture concurrente voit
+// l'ancien ou le nouveau contenu, jamais un fichier à moitié écrit.
+async function writeAll(meetings: Meeting[]): Promise<void> {
+  const tmp = `${DATA_FILE}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(meetings, null, 2), "utf-8");
+  await fs.rename(tmp, DATA_FILE);
+}
+
+// Toutes les modifications passent par cette file : chaque lecture-modification-écriture
+// s'exécute seule, sinon deux requêtes simultanées (ex. envoi audio + mise à jour du
+// statut) pourraient s'écraser mutuellement.
+function mutate<T>(fn: (meetings: Meeting[]) => { result: T; changed: boolean }): Promise<T> {
+  const run = queue.then(async () => {
+    const meetings = await readAll();
+    const { result, changed } = fn(meetings);
+    if (changed) await writeAll(meetings);
+    return result;
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }
 
 export async function listMeetings(userId: string): Promise<Meeting[]> {
@@ -45,7 +60,7 @@ export async function getMeetingById(id: string, userId: string): Promise<Meetin
   return meetings.find((m) => m.id === id && m.userId === userId);
 }
 
-export async function insertMeeting(input: NewMeetingInput, userId: string): Promise<Meeting> {
+export function insertMeeting(input: NewMeetingInput, userId: string): Promise<Meeting> {
   const meeting: Meeting = {
     id: crypto.randomUUID(),
     userId,
@@ -56,42 +71,47 @@ export async function insertMeeting(input: NewMeetingInput, userId: string): Pro
     recordingDurationSec: null,
     createdAt: new Date().toISOString(),
   };
-  const meetings = await readAll();
-  meetings.push(meeting);
-  await writeAll(meetings);
-  return meeting;
+  return mutate((meetings) => {
+    meetings.push(meeting);
+    return { result: meeting, changed: true };
+  });
 }
 
-export async function patchMeeting(
+export function patchMeeting(
   id: string,
   userId: string,
   patch: Partial<Meeting>
 ): Promise<Meeting | undefined> {
-  const meetings = await readAll();
-  const index = meetings.findIndex((m) => m.id === id && m.userId === userId);
-  if (index === -1) return undefined;
-  meetings[index] = { ...meetings[index], ...patch };
-  await writeAll(meetings);
-  return meetings[index];
+  return mutate((meetings) => {
+    const index = meetings.findIndex((m) => m.id === id && m.userId === userId);
+    if (index === -1) return { result: undefined, changed: false };
+    meetings[index] = { ...meetings[index], ...patch };
+    return { result: meetings[index], changed: true };
+  });
 }
 
-export async function removeMeeting(id: string, userId: string): Promise<void> {
-  const meetings = await readAll();
-  await writeAll(meetings.filter((m) => !(m.id === id && m.userId === userId)));
+export function removeMeeting(id: string, userId: string): Promise<void> {
+  return mutate((meetings) => {
+    const index = meetings.findIndex((m) => m.id === id && m.userId === userId);
+    if (index === -1) return { result: undefined, changed: false };
+    meetings.splice(index, 1);
+    return { result: undefined, changed: true };
+  });
 }
 
 /**
  * Réunions créées avant l'introduction des comptes utilisateurs (pas de userId) : on les
  * rattache au compte admin plutôt que de les rendre invisibles à tout le monde.
  */
-export async function migrateOwnerlessMeetings(ownerId: string): Promise<void> {
-  const meetings = await readAll();
-  let changed = false;
-  for (const m of meetings) {
-    if (!m.userId) {
-      m.userId = ownerId;
-      changed = true;
+export function migrateOwnerlessMeetings(ownerId: string): Promise<void> {
+  return mutate((meetings) => {
+    let changed = false;
+    for (const m of meetings) {
+      if (!m.userId) {
+        m.userId = ownerId;
+        changed = true;
+      }
     }
-  }
-  if (changed) await writeAll(meetings);
+    return { result: undefined, changed };
+  });
 }

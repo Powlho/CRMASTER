@@ -28,13 +28,11 @@ const NOTION_LABELS: Record<Meeting["notionStatus"], string> = {
 
 interface TranscriptionPanelProps {
   meeting: Meeting;
-  audioBlob: Blob | null;
   onUpdate: (patch: Partial<Meeting>) => void;
 }
 
 export default function TranscriptionPanel({
   meeting,
-  audioBlob,
   onUpdate,
 }: TranscriptionPanelProps) {
   const config = useConfigStatus();
@@ -46,6 +44,11 @@ export default function TranscriptionPanel({
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Sert à ne lancer automatiquement la transcription que pour un audio envoyé pendant
+  // cette visite, et une seule fois : sinon un échec (statut remis en attente) relancerait
+  // la transcription en boucle, et chaque retour sur la page aussi.
+  const initialSavedAtRef = useRef(meeting.audio?.savedAt ?? null);
+  const autoStartedRef = useRef<string | null>(null);
   const reportFormat = getReportFormat(meeting.reportFormat);
 
   useEffect(() => {
@@ -63,23 +66,19 @@ export default function TranscriptionPanel({
 
   async function handleGenerateTranscription() {
     setError(null);
-    if (!audioBlob) {
-      setError(
-        "L'enregistrement audio n'est plus disponible dans cet onglet. Relancez un enregistrement pour lancer la transcription."
-      );
+    if (!meeting.audio) {
+      setError("Aucun enregistrement audio sauvegardé pour cette réunion.");
       return;
     }
 
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "recording.webm");
-    formData.append("profile", meeting.transcriptionProfile || "none");
-    if (meeting.speakersExpected) {
-      formData.append("speakersExpected", String(meeting.speakersExpected));
-    }
-
-    onUpdate({ transcriptionStatus: "en_cours" });
+    // On efface l'ancien identifiant pour que le suivi ne reprenne pas un job précédent.
+    onUpdate({ transcriptionStatus: "en_cours", assemblyTranscriptId: undefined });
     try {
-      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+      const res = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ meetingId: meeting.id }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Échec du lancement de la transcription.");
@@ -191,15 +190,18 @@ export default function TranscriptionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting.transcriptionStatus, meeting.assemblyTranscriptId]);
 
-  // Dès que l'enregistrement est prêt et AssemblyAI configuré, on lance la transcription
-  // sans attendre un clic — c'est l'upload automatique vers le serveur.
+  // Dès que l'audio est sauvegardé sur le serveur et AssemblyAI configuré, on lance la
+  // transcription sans attendre un clic.
   useEffect(() => {
-    if (!audioBlob) return;
+    const savedAt = meeting.audio?.savedAt;
+    if (!savedAt || savedAt === initialSavedAtRef.current) return;
+    if (autoStartedRef.current === savedAt) return;
     if (!config?.assemblyAI) return;
     if (meeting.transcriptionStatus !== "en_attente_outil") return;
+    autoStartedRef.current = savedAt;
     handleGenerateTranscription();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioBlob, config?.assemblyAI, meeting.transcriptionStatus]);
+  }, [meeting.audio?.savedAt, config?.assemblyAI, meeting.transcriptionStatus]);
 
   // Dès que la transcription est prête, on génère le compte rendu mis en forme (si un format
   // autre que « texte brut » a été choisi) avant d'envoyer vers Notion.
@@ -232,8 +234,7 @@ export default function TranscriptionPanel({
     currentUser?.notionEnabled,
   ]);
 
-  const hasRecording =
-    meeting.status !== "planifiee" && meeting.status !== "enregistrement_en_cours";
+  const hasRecording = Boolean(meeting.audio);
   const isTranscribing = meeting.transcriptionStatus === "en_cours";
   const canTranscribe =
     Boolean(config?.assemblyAI) &&

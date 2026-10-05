@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, MonitorUp, Square, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Download, Mic, MonitorUp, Square, TriangleAlert } from "lucide-react";
 import type { Meeting } from "@/lib/types";
 import { useMeetings } from "@/lib/store";
 
 type RecorderState = "idle" | "requesting" | "recording" | "stopped" | "error";
+type UploadState = "idle" | "uploading" | "done" | "error";
 type CaptureMode = "salle" | "proche";
 
 const MIC_STORAGE_KEY = "crmaster.micDeviceId";
@@ -81,19 +82,114 @@ function describeMicError(err: unknown): string {
   return err instanceof Error ? err.message : "Impossible de démarrer l'enregistrement.";
 }
 
-interface RecorderPanelProps {
-  meeting: Meeting;
-  onRecordingComplete?: (blob: Blob) => void;
+function formatSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} Mo`;
 }
 
-export default function RecorderPanel({ meeting, onRecordingComplete }: RecorderPanelProps) {
-  const { updateMeeting } = useMeetings();
+function localFileName(meeting: Meeting, blob: Blob) {
+  const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+  const base = meeting.title
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Za-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${base || "reunion"}.${ext}`;
+}
+
+// XMLHttpRequest plutôt que fetch : seul lui donne la progression de l'envoi, utile pour
+// un long enregistrement envoyé en 4G.
+function uploadAudio(
+  meetingId: string,
+  blob: Blob,
+  onProgress: (ratio: number) => void
+): Promise<Meeting> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/meetings/${meetingId}/audio`);
+    xhr.setRequestHeader("content-type", blob.type || "audio/webm");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let data: { error?: string } & Partial<Meeting> = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        // réponse non JSON (session expirée → page de connexion, erreur Nginx…)
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data.audio) {
+        resolve(data as Meeting);
+      } else if (xhr.status === 413) {
+        reject(new Error("Fichier trop volumineux pour le serveur."));
+      } else {
+        reject(new Error(data.error || "Le serveur n'a pas accepté l'enregistrement. Reconnectez-vous puis réessayez."));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Connexion perdue pendant l'envoi."));
+    xhr.send(blob);
+  });
+}
+
+function SavedRecording({
+  meeting,
+  justSaved,
+  onReplace,
+}: {
+  meeting: Meeting;
+  justSaved: boolean;
+  onReplace?: () => void;
+}) {
+  const src = `/api/meetings/${meeting.id}/audio`;
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-1 text-base font-semibold text-slate-900">Enregistrement</h2>
+      <p className="mb-4 text-sm text-slate-500">
+        Durée : {formatDuration(meeting.recordingDurationSec ?? 0)}
+        {meeting.audio && ` · ${formatSize(meeting.audio.sizeBytes)}`}
+      </p>
+      <audio controls preload="metadata" src={src} className="mb-4 w-full">
+        Votre navigateur ne supporte pas la lecture audio.
+      </audio>
+      <div className="flex flex-wrap items-center gap-4">
+        <a
+          href={`${src}?download=1`}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline"
+        >
+          <Download size={15} />
+          Télécharger l&apos;audio
+        </a>
+        {justSaved && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600">
+            <CheckCircle2 size={14} />
+            Sauvegardé sur le serveur
+          </span>
+        )}
+        {onReplace && (
+          <button
+            onClick={onReplace}
+            className="ml-auto text-xs text-slate-400 hover:text-slate-600 hover:underline"
+          >
+            Refaire l&apos;enregistrement
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function RecorderPanel({ meeting }: { meeting: Meeting }) {
+  const { updateMeeting, syncMeeting } = useMeetings();
   const [state, setState] = useState<RecorderState>("idle");
   const [seconds, setSeconds] = useState(0);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [secureContext, setSecureContext] = useState(true);
+  const [replacing, setReplacing] = useState(false);
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState("");
@@ -109,6 +205,8 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
   const meterRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
   const recordingRef = useRef(false);
+  const blobRef = useRef<Blob | null>(null);
+  const secondsRef = useRef(0);
 
   async function refreshDevices() {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -161,11 +259,45 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
       navigator.mediaDevices?.removeEventListener("devicechange", onDeviceChange);
       document.removeEventListener("visibilitychange", onVisibility);
       if (timerRef.current) clearInterval(timerRef.current);
-      cleanupMedia();
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      // Quitter la page en cours d'enregistrement (lien interne) : on arrête proprement,
+      // ce qui sauvegarde et envoie ce qui a été enregistré au lieu de le perdre.
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      } else {
+        cleanupMedia();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fermeture ou rechargement de l'onglet pendant l'enregistrement ou l'envoi : le
+  // navigateur demande confirmation.
+  useEffect(() => {
+    const unsaved = state === "recording" || uploadState === "uploading" || uploadState === "error";
+    if (!unsaved) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [state, uploadState]);
+
+  async function sendRecording() {
+    const blob = blobRef.current;
+    if (!blob) return;
+    setUploadState("uploading");
+    setUploadProgress(0);
+    setUploadError(null);
+    try {
+      const saved = await uploadAudio(meeting.id, blob, setUploadProgress);
+      syncMeeting(meeting.id, { audio: saved.audio });
+      setUploadState("done");
+    } catch (err) {
+      setUploadState("error");
+      setUploadError(err instanceof Error ? err.message : "Échec de l'envoi.");
+    }
+  }
 
   function startLevelMeter(stream: MediaStream, audioContext: AudioContext) {
     const analyser = audioContext.createAnalyser();
@@ -274,19 +406,31 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
+        if (timerRef.current) clearInterval(timerRef.current);
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        blobRef.current = blob;
         setAudioUrl(URL.createObjectURL(blob));
         cleanupMedia();
-        onRecordingComplete?.(blob);
+        setState("stopped");
+        updateMeeting(meeting.id, {
+          status: "enregistree",
+          recordingDurationSec: secondsRef.current,
+          transcriptionStatus: "en_attente_outil",
+        });
+        sendRecording();
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start(1000);
       setSeconds(0);
+      secondsRef.current = 0;
       setState("recording");
       updateMeeting(meeting.id, { status: "enregistrement_en_cours" });
 
-      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+      timerRef.current = setInterval(() => {
+        secondsRef.current += 1;
+        setSeconds(secondsRef.current);
+      }, 1000);
     } catch (err) {
       cleanupMedia();
       if (err instanceof DOMException && err.name === "OverconstrainedError") {
@@ -298,15 +442,27 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
     }
   }
 
+  // La suite (sauvegarde, envoi au serveur) est gérée par recorder.onstop.
   function stopRecording() {
-    if (timerRef.current) clearInterval(timerRef.current);
     mediaRecorderRef.current?.stop();
-    setState("stopped");
-    updateMeeting(meeting.id, {
-      status: "enregistree",
-      recordingDurationSec: seconds,
-      transcriptionStatus: "en_attente_outil",
-    });
+  }
+
+  if (state === "idle" && meeting.audio && !replacing) {
+    return (
+      <SavedRecording
+        meeting={meeting}
+        justSaved={false}
+        onReplace={() => {
+          if (
+            window.confirm(
+              "Un nouvel enregistrement remplacera l'audio actuel de cette réunion. Continuer ?"
+            )
+          ) {
+            setReplacing(true);
+          }
+        }}
+      />
+    );
   }
 
   if (state === "idle" || state === "requesting" || state === "error") {
@@ -433,6 +589,10 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
             {warning}
           </p>
         )}
+        <p className="mb-4 text-xs text-slate-500">
+          Gardez cette page ouverte jusqu&apos;à la fin : l&apos;audio est envoyé au serveur dès
+          l&apos;arrêt de l&apos;enregistrement.
+        </p>
         <button
           onClick={stopRecording}
           className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
@@ -444,20 +604,66 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
     );
   }
 
+  if (uploadState === "done") {
+    return <SavedRecording meeting={meeting} justSaved />;
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="mb-1 text-base font-semibold text-slate-900">Enregistrement terminé</h2>
       <p className="mb-4 text-sm text-slate-500">
         Durée : {formatDuration(meeting.recordingDurationSec ?? seconds)}
+        {blobRef.current && ` · ${formatSize(blobRef.current.size)}`}
       </p>
       {audioUrl && (
         <audio controls src={audioUrl} className="mb-4 w-full">
           Votre navigateur ne supporte pas la lecture audio.
         </audio>
       )}
-      <p className="text-xs text-slate-400">
-        L&apos;audio est envoyé automatiquement à votre serveur pour être transcrit.
-      </p>
+
+      {uploadState === "error" ? (
+        <div>
+          <p className="mb-3 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+            <span>
+              {uploadError} L&apos;audio n&apos;est pas encore sauvegardé : ne quittez pas cette
+              page sans l&apos;avoir envoyé ou téléchargé.
+            </span>
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={sendRecording}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+            >
+              Réessayer l&apos;envoi
+            </button>
+            {audioUrl && blobRef.current && (
+              <a
+                href={audioUrl}
+                download={localFileName(meeting, blobRef.current)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline"
+              >
+                <Download size={15} />
+                Télécharger une copie
+              </a>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="mb-1 flex justify-between text-xs text-slate-500">
+            <span>Envoi vers le serveur…</span>
+            <span className="tabular-nums">{Math.round(uploadProgress * 100)} %</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-brand-500 transition-[width] duration-200"
+              style={{ width: `${Math.round(uploadProgress * 100)}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-400">Ne fermez pas cette page avant la fin.</p>
+        </div>
+      )}
     </div>
   );
 }
