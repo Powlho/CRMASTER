@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/setup-requis", "/api/auth/login"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/setup-requis",
+  "/api/auth/login",
+  // Application installable : le navigateur lit ces fichiers sans cookie de session.
+  "/manifest.webmanifest",
+  "/sw.js",
+  // Cible du partage Android, normalement interceptée par le service worker (voir
+  // app/partager-cible/route.ts) : aucune donnée n'y est lue.
+  "/partager-cible",
+];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (PUBLIC_PATHS.includes(pathname)) {
+  if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith("/icons/")) {
     return NextResponse.next();
   }
 

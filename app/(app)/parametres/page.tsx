@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Lock, Mic, NotebookText, SlidersHorizontal } from "lucide-react";
+import { Lock, Mic, NotebookText, SlidersHorizontal, Smartphone } from "lucide-react";
 import { useConfigStatus } from "@/lib/useConfigStatus";
 import { useCurrentUser } from "@/lib/useCurrentUser";
+import {
+  getInstallPrompt,
+  isInstalled,
+  onInstallPromptChange,
+  promptInstall,
+} from "@/lib/installPrompt";
 
 function StatusPill({ ok }: { ok: boolean | undefined }) {
   if (ok === undefined) {
@@ -84,6 +90,62 @@ function Preferences() {
   );
 }
 
+function InstallApp() {
+  const [secure, setSecure] = useState(true);
+  const [installed, setInstalled] = useState(false);
+  const [canPrompt, setCanPrompt] = useState(false);
+
+  useEffect(() => {
+    setSecure(window.isSecureContext);
+    const refresh = () => {
+      setInstalled(isInstalled());
+      setCanPrompt(Boolean(getInstallPrompt()));
+    };
+    refresh();
+    return onInstallPromptChange(refresh);
+  }, []);
+
+  return (
+    <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+          <Smartphone size={15} />
+        </div>
+        <h2 className="text-base font-semibold text-slate-900">Application sur le téléphone</h2>
+      </div>
+      <p className="mb-3 text-sm text-slate-600">
+        Installée sur votre téléphone Android, CRMASTER a son icône sur l&apos;écran
+        d&apos;accueil et apparaît dans le menu <strong>Partager</strong> : depuis
+        l&apos;Enregistreur Google, Partager → Fichier audio → CRMASTER crée la réunion et lance
+        la transcription.
+      </p>
+      {installed ? (
+        <p className="text-sm font-medium text-emerald-600">
+          Application installée sur cet appareil.
+        </p>
+      ) : !secure ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          L&apos;installation nécessite une connexion sécurisée : ouvrez CRMASTER via son adresse
+          en https:// sur votre téléphone.
+        </p>
+      ) : canPrompt ? (
+        <button
+          onClick={() => promptInstall()}
+          className="rounded-lg bg-gradient-to-r from-brand-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
+        >
+          Installer l&apos;application
+        </button>
+      ) : (
+        <p className="text-sm text-slate-500">
+          Sur votre téléphone, dans Chrome : menu <strong>⋮</strong> →{" "}
+          <strong>Installer l&apos;application</strong> (ou « Ajouter à l&apos;écran
+          d&apos;accueil »).
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const config = useConfigStatus();
 
@@ -97,6 +159,7 @@ export default function SettingsPage() {
       </p>
 
       <Preferences />
+      <InstallApp />
 
       <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">

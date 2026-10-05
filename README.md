@@ -25,6 +25,14 @@ l'appareil (IndexedDB). Réseau coupé, onglet fermé ou téléphone éteint : l
 interrompu se récupère en rouvrant la réunion (depuis l'appareil, ou depuis ce que le serveur
 a déjà reçu).
 
+### Application installable (Android) et partage
+
+En HTTPS, CRMASTER s'installe depuis Chrome (menu ⋮ → Installer l'application, ou bouton
+dans **Paramètres**). Elle apparaît alors dans le menu **Partager** d'Android : depuis
+l'Enregistreur Google, Partager → Fichier audio → CRMASTER ouvre `/partager`, qui crée la
+réunion, envoie l'audio et lance la transcription. Le fichier est reçu par le service worker
+(`public/sw.js`) et gardé sur l'appareil jusqu'à l'envoi.
+
 ### Sauvegarde
 
 `deploy/install-backup.sh` (lancé automatiquement par `setup-vps.sh` et `update.sh` en root)
