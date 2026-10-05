@@ -35,9 +35,77 @@ function chunkText(text: string, size = BLOCK_TEXT_LIMIT): string[] {
   return chunks;
 }
 
+type NotionResult =
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; error: string; status: number };
+
+// Erreurs Notion les plus courantes, traduites avec la marche à suivre.
+function describeNotionError(status: number, body: { code?: string; message?: string }): string {
+  switch (body.code) {
+    case "unauthorized":
+      return "Notion refuse la clé (NOTION_API_KEY) : vérifiez le jeton de l'intégration dans .env.local, puis redémarrez l'application.";
+    case "object_not_found":
+    case "restricted_resource":
+      return "Base Notion introuvable : vérifiez NOTION_DATABASE_ID et que la base est bien connectée à l'intégration (sur la page de la base : ••• → Connexions → votre intégration).";
+    case "rate_limited":
+      return "Notion limite temporairement les envois : réessayez dans une minute.";
+    case "validation_error":
+      return `Notion a refusé la page : ${body.message ?? "données invalides"}`;
+  }
+  return `Erreur Notion (${status})${body.message ? ` : ${body.message}` : ""}`;
+}
+
+async function notionFetch(path: string, init: RequestInit): Promise<NotionResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${NOTION_BASE}${path}`, {
+      ...init,
+      cache: "no-store",
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string } })?.cause?.code;
+    console.error(`[notion] ${path} :`, err);
+    return {
+      ok: false,
+      status: 502,
+      error: `Le serveur n'arrive pas à joindre Notion${cause ? ` (${cause})` : ""}. Réessayez dans un instant.`,
+    };
+  }
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const error = describeNotionError(res.status, data as { code?: string; message?: string });
+    console.error(`[notion] ${path} : ${res.status} ${JSON.stringify(data).slice(0, 300)}`);
+    return { ok: false, status: 502, error };
+  }
+  return { ok: true, data };
+}
+
+// NOTION_DATABASE_ID accepte l'identifiant seul ou le lien complet de la base (copié depuis
+// le navigateur : …/Ma-base-1a2b3c…?v=…).
+function normalizeDatabaseId(raw: string): string {
+  const beforeQuery = raw.trim().split("?")[0];
+  const dashed = beforeQuery.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (dashed) return dashed[0];
+  const plain = beforeQuery.match(/[0-9a-f]{32}(?![0-9a-f])/i);
+  return plain ? plain[0] : raw.trim();
+}
+
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.NOTION_API_KEY;
-  const databaseId = process.env.NOTION_DATABASE_ID;
+  try {
+    return await sendToNotion(req);
+  } catch (err) {
+    console.error("[notion] erreur inattendue :", err);
+    return NextResponse.json(
+      { error: "Erreur interne pendant l'envoi vers Notion (voir pm2 logs crmaster)." },
+      { status: 500 }
+    );
+  }
+}
+
+async function sendToNotion(req: NextRequest) {
+  const apiKey = process.env.NOTION_API_KEY?.trim();
+  const databaseId = normalizeDatabaseId(process.env.NOTION_DATABASE_ID ?? "");
   if (!apiKey || !databaseId) {
     return NextResponse.json(
       { error: "NOTION_API_KEY et/ou NOTION_DATABASE_ID ne sont pas configurés sur le serveur." },
@@ -54,7 +122,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as {
+  const body = (await req.json().catch(() => null)) as {
     title: string;
     date: string;
     time: string;
@@ -68,25 +136,25 @@ export async function POST(req: NextRequest) {
     formattedReportLabel: string | null;
   };
 
+  if (!body?.title) {
+    return NextResponse.json({ error: "Données de la réunion manquantes." }, { status: 400 });
+  }
+
   const headers = {
     authorization: `Bearer ${apiKey}`,
     "Notion-Version": NOTION_VERSION,
     "content-type": "application/json",
   };
 
-  const dbRes = await fetch(`${NOTION_BASE}/databases/${databaseId}`, {
-    headers,
-    cache: "no-store",
-  });
-  if (!dbRes.ok) {
+  const dbRes = await notionFetch(`/databases/${databaseId}`, { headers });
+  if (!dbRes.ok) return NextResponse.json({ error: dbRes.error }, { status: dbRes.status });
+  const db = dbRes.data as { properties?: Record<string, NotionProperty> };
+  if (!db.properties) {
     return NextResponse.json(
-      {
-        error: `Impossible de lire la base Notion (${dbRes.status}). Vérifiez que l'intégration a bien été partagée avec cette base.`,
-      },
+      { error: "Réponse inattendue de Notion pour la base (pas de propriétés)." },
       { status: 502 }
     );
   }
-  const db = (await dbRes.json()) as { properties: Record<string, NotionProperty> };
 
   const titlePropName = Object.entries(db.properties).find(
     ([, prop]) => prop.type === "title"
@@ -132,7 +200,7 @@ export async function POST(req: NextRequest) {
       : body.transcript;
   for (const chunk of chunkText(transcriptText)) blocks.push(paragraph(chunk));
 
-  const pageRes = await fetch(`${NOTION_BASE}/pages`, {
+  const pageRes = await notionFetch("/pages", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -141,25 +209,24 @@ export async function POST(req: NextRequest) {
       children: blocks.slice(0, BLOCKS_PER_REQUEST),
     }),
   });
+  if (!pageRes.ok) return NextResponse.json({ error: pageRes.error }, { status: pageRes.status });
+  const page = pageRes.data as { id: string; url: string };
 
-  if (!pageRes.ok) {
-    const errBody = await pageRes.text();
-    return NextResponse.json(
-      { error: `Échec de la création de la page Notion (${pageRes.status}): ${errBody}` },
-      { status: 502 }
-    );
-  }
-
-  const page = (await pageRes.json()) as { id: string; url: string };
-
+  // Notion limite à 100 blocs par requête : la suite d'une longue transcription est ajoutée
+  // ensuite. Si cet ajout échoue, la page existe déjà : on le signale sans la recréer.
   const remaining = blocks.slice(BLOCKS_PER_REQUEST);
   for (let i = 0; i < remaining.length; i += BLOCKS_PER_REQUEST) {
-    const batch = remaining.slice(i, i + BLOCKS_PER_REQUEST);
-    await fetch(`${NOTION_BASE}/blocks/${page.id}/children`, {
+    const appended = await notionFetch(`/blocks/${page.id}/children`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ children: batch }),
+      body: JSON.stringify({ children: remaining.slice(i, i + BLOCKS_PER_REQUEST) }),
     });
+    if (!appended.ok) {
+      return NextResponse.json({
+        url: page.url,
+        warning: `Page créée, mais la fin de la transcription n'a pas pu être ajoutée : ${appended.error}`,
+      });
+    }
   }
 
   return NextResponse.json({ url: page.url });

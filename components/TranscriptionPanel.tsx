@@ -397,15 +397,16 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
           formattedReportLabel: reportFormat.id !== "brut" ? reportFormat.label : null,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      const data = (await readJson(res)) as { error?: string; url?: string; warning?: string };
+      if (!res.ok || !data.url) {
         setNotionError(data.error || "Échec de l'envoi vers Notion.");
         return;
       }
+      if (data.warning) setNotionError(data.warning);
       onUpdate({ notionStatus: "envoyee", notionPageUrl: data.url });
       notify("Envoyée sur Notion", meeting.title);
     } catch {
-      setNotionError("Impossible de contacter Notion.");
+      setNotionError("Impossible de contacter le serveur CRMASTER (connexion perdue ?).");
     } finally {
       setSendingToNotion(false);
     }
