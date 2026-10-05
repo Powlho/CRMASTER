@@ -32,10 +32,21 @@ export async function generateText(opts: {
     const body = (await res.text()).slice(0, 300);
     return { error: `Échec de la génération (${res.status}) : ${body}`, status: 502 };
   }
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const text = data.choices?.[0]?.message?.content?.trim();
+  let data: { choices?: { message?: { content?: unknown } }[] };
+  try {
+    data = await res.json();
+  } catch {
+    return { error: "Réponse illisible du service de génération.", status: 502 };
+  }
+  // Format OpenAI (texte) ; certains modèles renvoient une liste de blocs { type, text }.
+  const content = data.choices?.[0]?.message?.content;
+  const text = (
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content.map((b) => (typeof b?.text === "string" ? b.text : "")).join("")
+        : ""
+  ).trim();
   if (!text) return { error: "Réponse vide du service de génération.", status: 502 };
   return { text };
 }

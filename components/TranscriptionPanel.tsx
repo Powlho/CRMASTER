@@ -43,6 +43,25 @@ interface TranscriptionPanelProps {
   onUpdate: (patch: Partial<Meeting>) => void;
 }
 
+const GENERATION_TIMEOUT_MS = 8 * 60 * 1000;
+
+// Réponse non JSON (coupure par Nginx, serveur arrêté…) : on garde au moins le code HTTP,
+// pour que l'erreur affichée dise quelque chose d'utile.
+async function readJson(
+  res: Response
+): Promise<{ error?: string; status?: string; meeting?: unknown; transcriptId?: string }> {
+  try {
+    return await res.json();
+  } catch {
+    if (res.status === 502 || res.status === 504) {
+      return {
+        error: `Le serveur web a coupé la requête (${res.status}) : délai dépassé ou application arrêtée.`,
+      };
+    }
+    return { error: `Erreur serveur (${res.status}).` };
+  }
+}
+
 // navigator.clipboard n'existe qu'en HTTPS : repli sur l'ancienne méthode sinon.
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -275,7 +294,7 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ meetingId: meeting.id }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await readJson(res);
       if (!res.ok) {
         setError(data.error || "Échec du lancement de la transcription.");
         syncMeeting(meeting.id, {
@@ -295,17 +314,38 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
     }
   }
 
-  // Résumé et compte rendu mis en forme : générés par le serveur à partir de la transcription
-  // enregistrée (avec les noms des intervenants).
-  async function generate(kind: "summary" | "report"): Promise<string> {
-    const res = await fetch("/api/report", {
+  // Résumé et compte rendu mis en forme : générés en tâche de fond par le serveur, à partir
+  // de la transcription enregistrée (avec les noms des intervenants). On lance, puis on
+  // interroge l'état jusqu'au résultat, que le serveur a déjà enregistré dans la réunion.
+  async function generate(kind: "summary" | "report"): Promise<void> {
+    const start = await fetch("/api/report", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ meetingId: meeting.id, kind }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.text) throw new Error(data.error || "Échec de la génération.");
-    return data.text as string;
+    const started = await readJson(start);
+    if (!start.ok) throw new Error(started.error || `Erreur serveur (${start.status}).`);
+
+    const deadline = Date.now() + GENERATION_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      let res: Response;
+      try {
+        res = await fetch(`/api/report?meetingId=${meeting.id}&kind=${kind}`);
+      } catch {
+        continue; // coupure réseau passagère : on réessaie au tour suivant
+      }
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(data.error || `Erreur serveur (${res.status}).`);
+      if (data.status === "running") continue;
+      if (data.status === "done" && data.meeting) {
+        replaceMeeting(data.meeting as Meeting);
+        return;
+      }
+      if (data.status === "error") throw new Error(data.error || "Échec de la génération.");
+      throw new Error("La génération a été interrompue (serveur redémarré ?). Réessayez.");
+    }
+    throw new Error("La génération prend trop de temps. Réessayez dans quelques minutes.");
   }
 
   async function handleGenerateReport() {
@@ -313,7 +353,7 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
     setReportError(null);
     setGeneratingReport(true);
     try {
-      onUpdate({ formattedReport: await generate("report") });
+      await generate("report");
     } catch (err) {
       setReportError(err instanceof Error ? err.message : "Impossible de contacter le serveur.");
     } finally {
@@ -325,7 +365,7 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
     setSummaryError(null);
     setGeneratingSummary(true);
     try {
-      onUpdate({ transcriptSummary: await generate("summary") });
+      await generate("summary");
     } catch (err) {
       setSummaryError(err instanceof Error ? err.message : "Impossible de contacter le serveur.");
     } finally {
@@ -388,7 +428,7 @@ export default function TranscriptionPanel({ meeting, onUpdate }: TranscriptionP
         const res = await fetch(
           `/api/transcribe/${meeting.assemblyTranscriptId}?meetingId=${meeting.id}`
         );
-        const data = await res.json().catch(() => ({}));
+        const data = await readJson(res);
         if (data.meeting) replaceMeeting(data.meeting as Meeting);
         if (!res.ok || data.status === "error") {
           setError(data.error || "La transcription a échoué.");

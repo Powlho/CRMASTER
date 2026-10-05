@@ -17,6 +17,11 @@ npm run build
 echo "==> Redémarrage"
 pm2 restart crmaster
 
+# Réglages Nginx (taille d'envoi, délai) des installations antérieures, si root.
+if [[ $EUID -eq 0 ]]; then
+  bash deploy/fix-nginx.sh || true
+fi
+
 # Sauvegarde nocturne (programmée une fois, si le script tourne en root).
 if [[ $EUID -eq 0 && ! -f /etc/cron.d/crmaster-backup ]]; then
   echo "==> Programmation de la sauvegarde nocturne"
