@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AudioLines,
   CheckCircle2,
+  Cookie,
   Download,
   FilePlus2,
   Link2,
   Loader2,
   Trash2,
   TriangleAlert,
+  Upload,
   X,
 } from "lucide-react";
 import type { AudioDownloadJob, AudioFile } from "@/lib/types";
@@ -296,6 +298,135 @@ export default function AudioLibraryPage() {
           </ul>
         )}
       </section>
+
+      <CookiesSection />
     </div>
+  );
+}
+
+interface CookiesStatus {
+  configured: boolean;
+  updatedAt: string | null;
+}
+
+// YouTube bloque souvent les IP de serveurs (« confirmez que vous n'êtes pas un robot ») :
+// yt-dlp a alors besoin des cookies d'une session YouTube connectée.
+function CookiesSection() {
+  const [status, setStatus] = useState<CookiesStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("/api/audio/cookies")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => setStatus({ configured: false, updatedAt: null }));
+  }, []);
+
+  async function upload(file: File) {
+    setError(null);
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("cookies", file);
+      const res = await fetch("/api/audio/cookies", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) setError(data.error || "Échec de l'envoi des cookies.");
+      else setStatus(data);
+    } catch {
+      setError("Impossible de contacter le serveur.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!confirm("Supprimer les cookies YouTube du serveur ?")) return;
+    const res = await fetch("/api/audio/cookies", { method: "DELETE" }).catch(() => null);
+    if (res?.ok) setStatus(await res.json());
+  }
+
+  return (
+    <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-violet-500 text-white">
+            <Cookie size={15} />
+          </div>
+          <h2 className="text-base font-semibold text-slate-900">Cookies YouTube</h2>
+        </div>
+        {status &&
+          (status.configured ? (
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+              Envoyés le {new Date(status.updatedAt!).toLocaleDateString("fr-FR")}
+            </span>
+          ) : (
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+              Aucun
+            </span>
+          ))}
+      </div>
+      <p className="mb-3 text-sm text-slate-500">
+        Si YouTube répond « confirmez que vous n&apos;êtes pas un robot », il faut fournir au
+        serveur les cookies d&apos;une session YouTube connectée :
+      </p>
+      <ol className="mb-4 list-decimal space-y-1 pl-5 text-sm text-slate-600">
+        <li>
+          Installez l&apos;extension{" "}
+          <a
+            href="https://github.com/kairi003/Get-cookies.txt-LOCALLY"
+            target="_blank"
+            rel="noreferrer"
+            className="text-brand-600 hover:underline"
+          >
+            Get cookies.txt LOCALLY
+          </a>{" "}
+          (Chrome / Firefox) et autorisez-la en navigation privée.
+        </li>
+        <li>
+          Ouvrez une <strong>fenêtre de navigation privée</strong>, connectez-vous à YouTube
+          (idéalement avec un compte Google secondaire), puis allez sur youtube.com/robots.txt.
+        </li>
+        <li>Exportez les cookies avec l&apos;extension (format Netscape), puis fermez la fenêtre privée sans vous déconnecter.</li>
+        <li>Envoyez le fichier ici.</li>
+      </ol>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+          {status?.configured ? "Remplacer le fichier cookies" : "Envoyer le fichier cookies"}
+        </button>
+        {status?.configured && (
+          <button
+            type="button"
+            onClick={remove}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600"
+          >
+            Supprimer
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".txt,text/plain"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) upload(file);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      <p className="mt-3 text-xs text-slate-400">
+        Les cookies restent sur le serveur et ne sont jamais renvoyés au navigateur. Ils
+        expirent au bout de quelques semaines : renvoyez-en de nouveaux si le blocage revient.
+      </p>
+    </section>
   );
 }

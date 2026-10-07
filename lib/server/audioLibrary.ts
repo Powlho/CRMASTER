@@ -11,6 +11,30 @@ export const AUDIO_DIR = path.resolve(
 
 const YTDLP_PATH = process.env.YTDLP_PATH || "yt-dlp";
 
+// Cookies YouTube (format Netscape) : nécessaires quand YouTube bloque l'IP du serveur
+// (« Sign in to confirm you're not a bot »). Envoyés depuis la Bibliothèque audio.
+export const COOKIES_FILE = path.resolve(
+  process.env.YTDLP_COOKIES_FILE || path.join(process.cwd(), "data", "youtube-cookies.txt")
+);
+
+export async function getCookiesStatus() {
+  try {
+    const stat = await fs.stat(COOKIES_FILE);
+    return { configured: true, updatedAt: stat.mtime.toISOString() };
+  } catch {
+    return { configured: false, updatedAt: null };
+  }
+}
+
+export async function saveCookies(content: string) {
+  await fs.mkdir(path.dirname(COOKIES_FILE), { recursive: true });
+  await fs.writeFile(COOKIES_FILE, content, { mode: 0o600 });
+}
+
+export async function deleteCookies() {
+  await fs.rm(COOKIES_FILE, { force: true });
+}
+
 const ID_PATTERN = /^[0-9a-f-]{36}$/;
 
 export function isValidAudioId(id: string) {
@@ -145,8 +169,8 @@ export async function startDownload(url: string): Promise<AudioDownloadJob> {
     "--print",
     `after_move:${["%(title)s", "%(duration)s", "%(extractor_key)s", "%(webpage_url)s", "%(filepath)s"].join(PRINT_SEPARATOR)}`,
   ];
-  if (process.env.YTDLP_COOKIES_FILE) {
-    args.push("--cookies", process.env.YTDLP_COOKIES_FILE);
+  if ((await getCookiesStatus()).configured) {
+    args.push("--cookies", COOKIES_FILE);
   }
   if (process.env.YTDLP_EXTRA_ARGS) {
     args.push(...process.env.YTDLP_EXTRA_ARGS.split(/\s+/).filter(Boolean));
@@ -205,6 +229,10 @@ export async function startDownload(url: string): Promise<AudioDownloadJob> {
       job.error =
         lastError?.replace(/;? please report this issue[\s\S]*$/, "") ||
         `Le téléchargement a échoué (code ${code}).`;
+      if (/confirm you.re not a bot|cookies/i.test(job.error)) {
+        job.error =
+          "YouTube bloque le serveur (« confirmez que vous n'êtes pas un robot »). Ajoutez ou renouvelez les cookies YouTube ci-dessous, puis réessayez.";
+      }
       return;
     }
     try {

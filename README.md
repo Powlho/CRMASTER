@@ -32,8 +32,9 @@ Prérequis serveur : `yt-dlp` et `ffmpeg` (installés automatiquement par `deplo
 `deploy/update.sh`). En local : `pip install yt-dlp` (ou `brew install yt-dlp ffmpeg`).
 
 Si YouTube refuse le téléchargement depuis le VPS (« Sign in to confirm you're not a bot »),
-exportez les cookies de votre navigateur au format Netscape (extension « Get cookies.txt
-LOCALLY ») vers un fichier sur le serveur et renseignez `YTDLP_COOKIES_FILE`.
+envoyez un fichier de cookies YouTube depuis la section **Cookies YouTube** de la Bibliothèque
+audio (la marche à suivre y est détaillée). Il est stocké dans `data/youtube-cookies.txt` (ou
+`YTDLP_COOKIES_FILE`).
 
 Cette fonctionnalité nécessite un VPS : sur le plan gratuit de Render, yt-dlp n'est pas installé et
 le disque n'est pas persistant.
