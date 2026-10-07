@@ -27,3 +27,13 @@ body {
 .rec-dot {
   animation: pulse-rec 1.4s ease-in-out infinite;
 }
+
+/* Impression / PDF (page /imprimer) : marges de page et fond blanc. */
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+  body {
+    background: #fff !important;
+  }
+}

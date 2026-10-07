@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Users } from "lucide-react";
 import type { Meeting } from "@/lib/types";
+import type { SearchHit } from "@/lib/search";
 import { MeetingStatusBadge, MeetingTypeBadge, STATUS_ACCENT } from "./StatusBadge";
 
 function formatDate(date: string, time: string) {
@@ -18,7 +19,13 @@ function formatDate(date: string, time: string) {
   }
 }
 
-export default function MeetingCard({ meeting }: { meeting: Meeting }) {
+export default function MeetingCard({
+  meeting,
+  snippet,
+}: {
+  meeting: Meeting;
+  snippet?: SearchHit["snippet"];
+}) {
   return (
     <Link
       href={`/reunions/${meeting.id}`}
@@ -41,6 +48,14 @@ export default function MeetingCard({ meeting }: { meeting: Meeting }) {
           </span>
         )}
       </div>
+      {snippet && (
+        <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
+          <span className="font-medium text-slate-400">{snippet.source} · </span>
+          {snippet.before}
+          <mark className="rounded bg-amber-100 px-0.5 text-slate-800">{snippet.match}</mark>
+          {snippet.after}
+        </p>
+      )}
     </Link>
   );
 }

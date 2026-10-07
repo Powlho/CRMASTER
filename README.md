@@ -6,38 +6,84 @@ Copiez `.env.example` en `.env.local` et renseignez :
 
 - `ASSEMBLYAI_API_KEY` — clé API [AssemblyAI](https://www.assemblyai.com/) (transcription)
 - `NOTION_API_KEY` et `NOTION_DATABASE_ID` — intégration [Notion](https://www.notion.so/my-integrations) (envoi des comptes-rendus)
+- `AUTH_SECRET` — signe les sessions (obligatoire dès que le site est exposé publiquement) ;
+  se génère avec `openssl rand -hex 32`
+- `APP_PASSWORD` — mot de passe du tout premier compte (identifiant `admin`), créé
+  automatiquement au premier démarrage. Les comptes suivants (multi-utilisateurs, avec ou
+  sans envoi Notion) se créent ensuite depuis la page **Administration**.
 
-Détails pas à pas dans la page **Paramètres** de l'application.
+Détails pas à pas dans la page **Paramètres** de l'application. Les réunions sont stockées
+côté serveur dans `DATA_DIR` (par défaut `./data`, en JSON, un fichier par compte n'est pas
+nécessaire : chaque réunion est rattachée à son propriétaire) — ce dossier n'est jamais commit.
+Les fichiers audio sont dans `DATA_DIR/audio` ; leur durée de conservation se règle dans
+**Administration** (suppression automatique, transcriptions conservées).
+
+### Enregistrement fiable
+
+Pendant l'enregistrement, l'audio est envoyé au serveur toutes les 5 secondes et copié sur
+l'appareil (IndexedDB). Réseau coupé, onglet fermé ou téléphone éteint : l'enregistrement
+interrompu se récupère en rouvrant la réunion (depuis l'appareil, ou depuis ce que le serveur
+a déjà reçu).
+
+### Application installable (Android) et partage
+
+En HTTPS, CRMASTER s'installe depuis Chrome (menu ⋮ → Installer l'application, ou bouton
+dans **Paramètres**). Elle apparaît alors dans le menu **Partager** d'Android : depuis
+l'Enregistreur Google, Partager → Fichier audio → CRMASTER ouvre `/partager`, qui crée la
+réunion, envoie l'audio et lance la transcription. Le fichier est reçu par le service worker
+(`public/sw.js`) et gardé sur l'appareil jusqu'à l'envoi.
+
+### Sauvegarde
+
+`deploy/install-backup.sh` (lancé automatiquement par `setup-vps.sh` et `update.sh` en root)
+programme une sauvegarde nocturne des données JSON dans `/var/backups/crmaster` (30 jours).
+Une copie hors serveur se télécharge depuis la page **Administration**.
+
+### Mettre à jour une instance déjà déployée
+
+Ajoutez simplement `APP_PASSWORD` et `AUTH_SECRET` à votre `.env.local` existant, puis
+redémarrez (`pm2 restart crmaster` après `bash deploy/update.sh`). Sans ces deux variables,
+l'application affiche une page « Authentification non configurée » au lieu de démarrer —
+c'est voulu, pour ne jamais laisser le site ouvert par erreur. Au premier login, le compte
+`admin` est créé avec `APP_PASSWORD`, et les réunions existantes (créées avant les comptes
+multi-utilisateurs) lui sont automatiquement rattachées.
 
 ## Transcription
 
 La transcription se lance **manuellement** depuis la page d'une réunion (bouton « Lancer la
-transcription »), à partir d'un fichier audio au choix :
+transcription »), une fois l'audio en place : enregistrement, fichier importé, ou fichier de la
+**Bibliothèque audio**. Le résumé, le compte rendu et l'envoi vers Notion suivent comme avant.
 
-- l'enregistrement fait dans le navigateur (sauvegardé automatiquement sur le serveur à l'arrêt) ;
-- un fichier de la **Bibliothèque audio** ;
-- un fichier importé depuis votre ordinateur.
+Les imports partent par morceaux de 16 Mo : ils passent derrière Cloudflare (100 Mo maximum par
+requête) jusqu'à 2 Go.
 
-Le compte rendu est ensuite envoyé vers Notion.
+## Agenda Google
+
+La page **Agenda** affiche les événements Google Agenda de chaque compte (lecture seule) ; un clic
+sur un événement ouvre « Nouvelle réunion » prérempli (titre, date, heure, participants, lien
+visio, description). Chaque compte connecte son propre agenda ; le jeton est stocké chiffré
+(`data/google-tokens.json`, clé dérivée d'`AUTH_SECRET`).
+
+Configuration (une fois) : projet Google Cloud avec l'API Google Calendar activée, écran de
+consentement **publié** (en mode « Test » l'accès expire au bout de 7 jours), ID client OAuth
+« Application Web » avec l'URI de redirection `<APP_URL>/api/google/callback`, puis
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` et `APP_URL` dans `.env.local`. La page Agenda détaille
+ces étapes et affiche l'URI exacte à déclarer.
 
 ## Bibliothèque audio (YouTube et autres plateformes)
 
-La page **Bibliothèque audio** (barre latérale) récupère la piste audio d'une vidéo à partir de son
-lien (YouTube, Vimeo, Dailymotion, Twitch, X, LinkedIn… — tous les sites gérés par
-[yt-dlp](https://github.com/yt-dlp/yt-dlp)). Les fichiers sont stockés sur le serveur
-(`data/audio/` par défaut, ou `AUDIO_STORAGE_DIR`), écoutables et téléchargeables depuis l'app, et
-le bouton « Compte rendu » crée une réunion prête à être transcrite.
+La page **Bibliothèque audio** récupère la piste audio d'une vidéo à partir de son lien (YouTube,
+Vimeo, Dailymotion, Twitch, X, LinkedIn… — tous les sites gérés par
+[yt-dlp](https://github.com/yt-dlp/yt-dlp)). Les fichiers sont propres à chaque compte, stockés
+dans `data/library/`, et utilisables comme audio d'une réunion (« Compte rendu » depuis la
+bibliothèque, ou « Audio de la bibliothèque » sur la page d'une réunion).
 
-Prérequis serveur : `yt-dlp` et `ffmpeg` (installés automatiquement par `deploy/setup-vps.sh` et
-`deploy/update.sh`). En local : `pip install yt-dlp` (ou `brew install yt-dlp ffmpeg`).
+Prérequis serveur : `yt-dlp` et `ffmpeg` (installés et tenus à jour par `deploy/setup-vps.sh` et
+`deploy/update.sh`).
 
-Si YouTube refuse le téléchargement depuis le VPS (« Sign in to confirm you're not a bot »),
-envoyez un fichier de cookies YouTube depuis la section **Cookies YouTube** de la Bibliothèque
-audio (la marche à suivre y est détaillée). Il est stocké dans `data/youtube-cookies.txt` (ou
-`YTDLP_COOKIES_FILE`).
-
-Cette fonctionnalité nécessite un VPS : sur le plan gratuit de Render, yt-dlp n'est pas installé et
-le disque n'est pas persistant.
+Si YouTube refuse le téléchargement depuis le VPS (« Sign in to confirm you're not a bot »), un
+administrateur peut envoyer un fichier de cookies YouTube depuis la section **Cookies YouTube**
+de la bibliothèque (stocké dans `data/youtube-cookies.txt`).
 
 ## Développement
 
@@ -74,7 +120,7 @@ régulier sans délai de réveil.
    (Let's Encrypt) si vous avez déjà un nom de domaine pointant vers le VPS.
 4. Pour les mises à jour suivantes (après un nouveau push) :
    ```bash
-   cd /opt/crmaster && bash deploy/update.sh
+   cd /opt/crmaster && sudo bash deploy/update.sh
    ```
 
 Le script ne touche jamais à la configuration SSH (pas de désactivation de l'auth par mot de

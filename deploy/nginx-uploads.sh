@@ -1,27 +1,45 @@
 #!/usr/bin/env bash
 #
-# Autorise l'envoi de gros fichiers audio/vidéo (jusqu'à 2 Go) à travers Nginx.
-# La limite par défaut de Nginx (1 Mo) bloque les enregistrements et les imports.
-# Appelé par setup-vps.sh et update.sh ; peut aussi être lancé seul : sudo bash deploy/nginx-uploads.sh
+# Réglages Nginx de CRMASTER : envois jusqu'à 2 Go (Nginx refuse tout envoi > 1 Mo par
+# défaut) et délais de 600 s. Posés dans un fichier dédié du bloc http, les anciennes valeurs
+# du site (qui prendraient le dessus) sont retirées. La configuration d'origine est remise
+# en place si Nginx la refuse. À lancer en root :
+#   cd /opt/crmaster && sudo bash deploy/nginx-uploads.sh
+#
+# Note : derrière Cloudflare, chaque requête est de toute façon limitée à 100 Mo ; l'app
+# envoie les fichiers par morceaux pour rester sous cette limite.
 
 set -euo pipefail
 
-# Réglage global (bloc http) : s'applique à tous les sites servis par ce Nginx.
-cat > /etc/nginx/conf.d/crmaster-uploads.conf <<'NGINX'
+SITE="${NGINX_CONF:-/etc/nginx/sites-available/crmaster}"
+GLOBAL=/etc/nginx/conf.d/crmaster-uploads.conf
+
+BACKUP_DIR="$(mktemp -d)"
+[[ -f "$SITE" ]] && cp "$SITE" "$BACKUP_DIR/site"
+[[ -f "$GLOBAL" ]] && cp "$GLOBAL" "$BACKUP_DIR/global"
+
+cat > "$GLOBAL" <<'NGINX'
 client_max_body_size 2G;
 proxy_read_timeout 600s;
 proxy_send_timeout 600s;
 NGINX
 
-# Une valeur posée dans le bloc server du site prendrait le dessus : on la retire.
-for f in /etc/nginx/sites-available/crmaster /etc/nginx/nginx.conf; do
-  if [[ -f "$f" ]]; then
-    sed -i '/^\s*\(client_max_body_size\|proxy_read_timeout\|proxy_send_timeout\)\s/d' "$f"
-  fi
-done
+if [[ -f "$SITE" ]]; then
+  sed -i '/^\s*\(client_max_body_size\|proxy_read_timeout\|proxy_send_timeout\)\s/d' "$SITE"
+fi
 
-nginx -t
-systemctl reload nginx
+if [[ "${SKIP_NGINX_RELOAD:-}" == "1" ]]; then
+  echo "Configuration modifiée (rechargement ignoré)."
+  exit 0
+fi
 
-echo "    Limite active :"
-nginx -T 2>/dev/null | grep -n "client_max_body_size" | sed 's/^/      /' || true
+if nginx -t; then
+  systemctl reload nginx
+  echo "==> Nginx : envois jusqu'à 2 Go, délais de 600 s."
+  rm -rf "$BACKUP_DIR"
+else
+  [[ -f "$BACKUP_DIR/site" ]] && cp "$BACKUP_DIR/site" "$SITE"
+  if [[ -f "$BACKUP_DIR/global" ]]; then cp "$BACKUP_DIR/global" "$GLOBAL"; else rm -f "$GLOBAL"; fi
+  echo "Nginx a refusé la nouvelle configuration : l'ancienne a été remise en place." >&2
+  exit 1
+fi

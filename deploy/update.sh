@@ -32,16 +32,22 @@ else
   yt-dlp -U || true
 fi
 
-if command -v nginx >/dev/null; then
-  echo "==> Nginx : envois de fichiers audio/vidéo jusqu'à 2 Go"
-  bash deploy/nginx-uploads.sh
-fi
-
 echo "==> Installation des dépendances et build"
 npm install
 npm run build
 
 echo "==> Redémarrage"
 pm2 restart crmaster
+
+# Réglages Nginx (taille d'envoi, délais).
+if command -v nginx >/dev/null; then
+  bash deploy/nginx-uploads.sh || true
+fi
+
+# Sauvegarde nocturne (programmée une fois).
+if [[ ! -f /etc/cron.d/crmaster-backup ]]; then
+  echo "==> Programmation de la sauvegarde nocturne"
+  bash deploy/install-backup.sh
+fi
 
 echo "==> Terminé."

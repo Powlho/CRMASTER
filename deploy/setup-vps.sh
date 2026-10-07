@@ -30,8 +30,10 @@ REPO_URL="${REPO_URL:-$REPO_URL_DEFAULT}"
 read -rp "Branche à déployer [main] : " REPO_BRANCH
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
-read -rp "Nom de domaine pointant déjà vers ce VPS (laisser vide si aucun pour l'instant) : " DOMAIN
-if [[ -n "$DOMAIN" ]]; then
+read -rp "Nom(s) de domaine pointant déjà vers ce VPS, séparés par des espaces (vide si aucun) : " DOMAIN
+DOMAIN="${DOMAIN//,/ }"
+read -ra DOMAINS <<< "$DOMAIN"
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   read -rp "Email pour le certificat HTTPS (Let's Encrypt) : " CERT_EMAIL
 fi
 
@@ -79,9 +81,14 @@ cd "$APP_DIR"
 
 if [[ ! -f .env.local ]]; then
   cp .env.example .env.local
-  echo "!! Fichier .env.local créé, vide. Éditez-le avant de continuer :"
+  if command -v openssl >/dev/null 2>&1; then
+    GENERATED_SECRET=$(openssl rand -hex 32)
+    sed -i "s#^AUTH_SECRET=.*#AUTH_SECRET=${GENERATED_SECRET}#" .env.local
+  fi
+  echo "!! Fichier .env.local créé. Éditez-le avant de continuer :"
   echo "   nano $APP_DIR/.env.local"
-  echo "   (ASSEMBLYAI_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID)"
+  echo "   (ASSEMBLYAI_API_KEY, NOTION_API_KEY, NOTION_DATABASE_ID, APP_PASSWORD"
+  echo "    — AUTH_SECRET a déjà été généré automatiquement)"
   read -rp "Appuyez sur Entrée une fois les clés renseignées pour continuer..." _
 fi
 
@@ -95,11 +102,14 @@ pm2 start npm --name crmaster -- start
 pm2 save
 pm2 startup systemd -u root --hp /root | tail -n 1 | bash || true
 
+echo "==> Sauvegarde nocturne des données"
+bash "$APP_DIR/deploy/install-backup.sh"
+
 echo "==> Configuration Nginx (reverse proxy vers le port 3000)"
 cat > /etc/nginx/sites-available/crmaster <<NGINX
 server {
     listen 80;
-    server_name ${DOMAIN:-_};
+    server_name ${DOMAINS[*]:-_};
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -109,22 +119,28 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 }
 NGINX
 
 ln -sf /etc/nginx/sites-available/crmaster /etc/nginx/sites-enabled/crmaster
-bash "$APP_DIR/deploy/nginx-uploads.sh"
 rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
+# Taille d'envoi (2 Go) et délais, puis vérification et rechargement de Nginx.
+bash "$APP_DIR/deploy/nginx-uploads.sh"
 
-if [[ -n "$DOMAIN" ]]; then
-  echo "==> Certificat HTTPS (Let's Encrypt) pour $DOMAIN"
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+  echo "==> Certificat HTTPS (Let's Encrypt) pour : ${DOMAINS[*]}"
   apt-get install -y certbot python3-certbot-nginx
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERT_EMAIL" --redirect
-  echo "==> Terminé. Application disponible sur https://$DOMAIN"
+  CERTBOT_DOMAIN_ARGS=()
+  for d in "${DOMAINS[@]}"; do CERTBOT_DOMAIN_ARGS+=(-d "$d"); done
+  # --expand : si un certificat existe déjà pour une partie de ces domaines, on l'étend
+  # au lieu d'échouer (utile quand on ajoute un domaine en relançant le script).
+  certbot --nginx "${CERTBOT_DOMAIN_ARGS[@]}" --expand --non-interactive --agree-tos \
+    -m "$CERT_EMAIL" --redirect
+  echo "==> Terminé. Application disponible sur :"
+  for d in "${DOMAINS[@]}"; do echo "    https://$d"; done
 else
   echo "==> Terminé. Application disponible sur http://$(curl -s ifconfig.me)"
   echo "    Ajoutez un nom de domaine pointant vers cette IP puis relancez :"

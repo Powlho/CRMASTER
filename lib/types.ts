@@ -15,36 +15,67 @@ export type TranscriptionStatus =
 
 export type NotionStatus = "non_configure" | "a_envoyer" | "envoyee";
 
+export interface TranscriptUtterance {
+  speaker: string;
+  text: string;
+}
+
+export interface MeetingAudio {
+  mimeType: string;
+  sizeBytes: number;
+  savedAt: string;
+}
+
 export interface Meeting {
   id: string;
+  userId: string;
   title: string;
   type: MeetingType;
   date: string;
   time: string;
   participants: string;
   notes: string;
+  transcriptionProfile: string;
+  reportFormat: string;
+  speakersExpected?: number;
   status: MeetingStatus;
   transcriptionStatus: TranscriptionStatus;
   notionStatus: NotionStatus;
   recordingDurationSec: number | null;
   createdAt: string;
-  /** Fichier de la bibliothèque audio (stocké sur le serveur) utilisé pour la transcription. */
-  audioId?: string;
+  audio?: MeetingAudio;
+  /** Date de suppression automatique de l'audio (durée de conservation dépassée). */
+  audioDeletedAt?: string;
   assemblyTranscriptId?: string;
   transcriptText?: string;
   transcriptSummary?: string;
+  transcriptUtterances?: TranscriptUtterance[];
+  /** Noms donnés aux intervenants détectés : { "A": "Marie", "B": "Jean" }. */
+  speakerNames?: Record<string, string>;
+  formattedReport?: string;
   notionPageUrl?: string;
+  /** Événement Google Agenda à l'origine de la réunion. */
+  googleEventId?: string;
 }
 
 export type NewMeetingInput = Pick<
   Meeting,
-  "title" | "type" | "date" | "time" | "participants" | "notes"
+  | "title"
+  | "type"
+  | "date"
+  | "time"
+  | "participants"
+  | "notes"
+  | "transcriptionProfile"
+  | "reportFormat"
+  | "speakersExpected"
 >;
 
-export interface AudioFile {
+/** Piste audio de la bibliothèque (récupérée depuis YouTube ou une autre plateforme). */
+export interface LibraryFile {
   id: string;
+  userId: string;
   title: string;
-  source: "download" | "upload";
   sourceUrl: string | null;
   platform: string | null;
   durationSec: number | null;
@@ -55,6 +86,7 @@ export interface AudioFile {
 
 export interface AudioDownloadJob {
   id: string;
+  userId: string;
   url: string;
   status: "running" | "done" | "error";
   progress: number;
