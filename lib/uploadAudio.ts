@@ -12,7 +12,7 @@ export async function readApiResponse<T>(res: Response): Promise<T> {
   if (data?.error) throw new Error(data.error);
   if (res.status === 413) {
     throw new Error(
-      "Fichier trop volumineux pour le serveur (limite Nginx). Lancez « sudo bash deploy/update.sh » sur le VPS pour relever la limite."
+      "Envoi refusé car trop volumineux (limite Nginx du serveur). Lancez « sudo bash deploy/update.sh » sur le VPS."
     );
   }
   if (res.status === 502 || res.status === 503) {
@@ -24,22 +24,44 @@ export async function readApiResponse<T>(res: Response): Promise<T> {
   throw new Error(`Erreur du serveur (${res.status}).`);
 }
 
-/** Envoie un fichier audio (ou vidéo) dans la bibliothèque du serveur, en flux brut. */
-export async function uploadAudio(blob: Blob, fileName: string, title: string) {
-  let res: Response;
-  try {
-    res = await fetch("/api/audio", {
-      method: "POST",
-      headers: {
-        "content-type": "application/octet-stream",
-        "x-file-name": encodeURIComponent(fileName),
-        "x-title": encodeURIComponent(title),
-      },
-      body: blob,
-    });
-  } catch {
-    throw new Error("Connexion au serveur interrompue pendant l'envoi du fichier.");
+// Sous la limite de 100 Mo par requête de Cloudflare, et assez petit pour que chaque morceau
+// passe avant son délai d'attente (100 s) même sur une connexion lente.
+const CHUNK_SIZE = 20 * 1024 * 1024;
+
+/**
+ * Envoie un fichier audio (ou vidéo) dans la bibliothèque du serveur, par morceaux.
+ * `onProgress` reçoit l'avancement de 0 à 100.
+ */
+export async function uploadAudio(
+  blob: Blob,
+  fileName: string,
+  title: string,
+  onProgress?: (percent: number) => void
+): Promise<AudioFile> {
+  if (blob.size === 0) throw new Error("Le fichier est vide.");
+  const uploadId = crypto.randomUUID();
+  for (let offset = 0; offset < blob.size; offset += CHUNK_SIZE) {
+    const chunk = blob.slice(offset, offset + CHUNK_SIZE);
+    let res: Response;
+    try {
+      res = await fetch("/api/audio", {
+        method: "POST",
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-upload-id": uploadId,
+          "x-offset": String(offset),
+          "x-total-size": String(blob.size),
+          "x-file-name": encodeURIComponent(fileName),
+          "x-title": encodeURIComponent(title),
+        },
+        body: chunk,
+      });
+    } catch {
+      throw new Error("Connexion au serveur interrompue pendant l'envoi du fichier.");
+    }
+    const data = await readApiResponse<{ done: boolean; file?: AudioFile }>(res);
+    onProgress?.(Math.round(((offset + chunk.size) / blob.size) * 100));
+    if (data.done && data.file) return data.file;
   }
-  const data = await readApiResponse<{ file: AudioFile }>(res);
-  return data.file;
+  throw new Error("Le serveur n'a pas confirmé la réception complète du fichier.");
 }

@@ -46,6 +46,7 @@ export default function TranscriptionPanel({
   const [sendingToNotion, setSendingToNotion] = useState(false);
   const [library, setLibrary] = useState<AudioFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,8 +77,14 @@ export default function TranscriptionPanel({
   async function handleImportFile(file: File) {
     setError(null);
     setUploading(true);
+    setUploadProgress(0);
     try {
-      const saved = await uploadAudio(file, file.name, file.name.replace(/\.[^.]+$/, ""));
+      const saved = await uploadAudio(
+        file,
+        file.name,
+        file.name.replace(/\.[^.]+$/, ""),
+        setUploadProgress
+      );
       selectAudio(saved.id);
     } catch (err) {
       setError((err as Error).message);
@@ -257,7 +264,11 @@ export default function TranscriptionPanel({
               className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
             >
               {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-              {uploading ? "Import…" : "Importer un fichier"}
+              {uploading
+                ? uploadProgress < 100
+                  ? `Envoi… ${uploadProgress} %`
+                  : "Traitement…"
+                : "Importer un fichier"}
             </button>
             <input
               ref={fileInputRef}

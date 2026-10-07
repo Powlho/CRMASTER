@@ -98,37 +98,101 @@ async function writeMeta(file: AudioFile) {
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "avi", "m4v", "wmv", "flv", "mpg", "mpeg"]);
 
+const UPLOADS_DIR = path.join(AUDIO_DIR, ".uploads");
+const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
+
+export class UploadError extends Error {
+  constructor(message: string, readonly status = 400) {
+    super(message);
+  }
+}
+
 /**
- * Enregistre un fichier envoyé depuis le navigateur (enregistrement ou fichier local).
- * Le flux est écrit directement sur disque (pas de chargement en mémoire), et l'audio des
- * vidéos est extrait avec ffmpeg pour ne garder qu'un fichier léger.
+ * Reçoit un morceau d'un fichier envoyé depuis le navigateur (enregistrement ou fichier local).
+ * Les fichiers sont envoyés par morceaux pour passer sous la limite de taille des requêtes de
+ * Cloudflare (100 Mo) ; chaque morceau est ajouté sur disque, sans chargement en mémoire.
+ * Au dernier morceau, l'audio des vidéos est extrait avec ffmpeg pour ne garder qu'un
+ * fichier léger, et le fichier rejoint la bibliothèque.
  */
-export async function saveUploadedAudio(
-  body: ReadableStream<Uint8Array>,
-  originalName: string,
+export async function saveUploadChunk(params: {
+  uploadId: string;
+  offset: number;
+  total: number;
+  body: ReadableStream<Uint8Array>;
+  originalName: string;
+  title: string;
+}): Promise<{ done: false; received: number } | { done: true; file: AudioFile }> {
+  const { uploadId, offset, total, body, originalName, title } = params;
+  if (!isValidAudioId(uploadId)) throw new UploadError("Identifiant d'envoi invalide.");
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(total) || total <= 0 || offset < 0) {
+    throw new UploadError("Paramètres d'envoi invalides.");
+  }
+  await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  const ext = extFromName(originalName) || "webm";
+  const partPath = path.join(UPLOADS_DIR, `${uploadId}.${ext}`);
+
+  if (offset === 0) {
+    await cleanStaleUploads();
+  } else {
+    const current = await fs.stat(partPath).then((st) => st.size, () => -1);
+    if (current !== offset) {
+      throw new UploadError("Envoi interrompu : relancez l'import du fichier.", 409);
+    }
+  }
+
+  try {
+    await pipeline(
+      Readable.fromWeb(body as NodeReadableStream),
+      createWriteStream(partPath, { flags: offset === 0 ? "w" : "a" })
+    );
+  } catch (err) {
+    await fs.rm(partPath, { force: true });
+    throw err;
+  }
+
+  const received = (await fs.stat(partPath)).size;
+  if (received > total) {
+    await fs.rm(partPath, { force: true });
+    throw new UploadError("Taille reçue incohérente : relancez l'import du fichier.");
+  }
+  if (received < total) return { done: false, received };
+
+  return { done: true, file: await finalizeUpload(uploadId, partPath, ext, title) };
+}
+
+async function cleanStaleUploads() {
+  const now = Date.now();
+  for (const name of await fs.readdir(UPLOADS_DIR)) {
+    const p = path.join(UPLOADS_DIR, name);
+    const st = await fs.stat(p).catch(() => null);
+    if (st && now - st.mtimeMs > STALE_UPLOAD_MS) await fs.rm(p, { force: true });
+  }
+}
+
+async function finalizeUpload(
+  id: string,
+  partPath: string,
+  ext: string,
   title: string
 ): Promise<AudioFile> {
-  await ensureDir();
-  const id = randomUUID();
-  const ext = extFromName(originalName) || "webm";
   let fileName = `${id}.${ext}`;
-  const uploadPath = path.join(AUDIO_DIR, fileName);
   try {
-    await pipeline(Readable.fromWeb(body as NodeReadableStream), createWriteStream(uploadPath));
     if (VIDEO_EXTENSIONS.has(ext)) {
       fileName = `${id}.m4a`;
-      await extractAudio(uploadPath, path.join(AUDIO_DIR, fileName));
-      await fs.rm(uploadPath, { force: true });
+      await extractAudio(partPath, path.join(AUDIO_DIR, fileName));
+      await fs.rm(partPath, { force: true });
+    } else {
+      await fs.rename(partPath, path.join(AUDIO_DIR, fileName));
     }
   } catch (err) {
-    await fs.rm(uploadPath, { force: true });
-    await fs.rm(path.join(AUDIO_DIR, `${id}.m4a`), { force: true });
+    await fs.rm(partPath, { force: true });
+    await fs.rm(path.join(AUDIO_DIR, fileName), { force: true });
     throw err;
   }
   const { size } = await fs.stat(path.join(AUDIO_DIR, fileName));
   if (size === 0) {
     await fs.rm(path.join(AUDIO_DIR, fileName), { force: true });
-    throw new Error("Le fichier reçu est vide.");
+    throw new UploadError("Le fichier reçu est vide.");
   }
   const file: AudioFile = {
     id,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listAudioFiles, saveUploadedAudio } from "@/lib/server/audioLibrary";
+import { listAudioFiles, saveUploadChunk, UploadError } from "@/lib/server/audioLibrary";
 
 export const dynamic = "force-dynamic";
 
@@ -8,27 +8,33 @@ export async function GET() {
 }
 
 // Import d'un fichier audio (enregistrement du navigateur ou fichier local) dans la
-// bibliothèque. Le fichier est envoyé brut dans le corps de la requête, le nom et le titre
-// dans les en-têtes x-file-name / x-title (encodés en URI).
+// bibliothèque, par morceaux : chaque requête porte un morceau brut dans son corps, et les
+// en-têtes x-upload-id / x-offset / x-total-size / x-file-name / x-title (encodés en URI).
 export async function POST(req: NextRequest) {
   if (!req.body) {
     return NextResponse.json({ error: "Fichier audio manquant." }, { status: 400 });
   }
-  const decode = (v: string | null) => {
+  const header = (name: string) => {
     try {
-      return v ? decodeURIComponent(v) : "";
+      return decodeURIComponent(req.headers.get(name) ?? "");
     } catch {
       return "";
     }
   };
   try {
-    const file = await saveUploadedAudio(
-      req.body,
-      decode(req.headers.get("x-file-name")),
-      decode(req.headers.get("x-title")).slice(0, 300)
-    );
-    return NextResponse.json({ file });
+    const result = await saveUploadChunk({
+      uploadId: header("x-upload-id"),
+      offset: Number(header("x-offset")),
+      total: Number(header("x-total-size")),
+      body: req.body,
+      originalName: header("x-file-name"),
+      title: header("x-title").slice(0, 300),
+    });
+    return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof UploadError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error("Import audio échoué :", err);
     return NextResponse.json(
       { error: `Échec de l'enregistrement du fichier sur le serveur : ${(err as Error).message}` },
