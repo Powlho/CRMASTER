@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { AudioFile, Meeting } from "@/lib/types";
 import { useConfigStatus } from "@/lib/useConfigStatus";
+import { readApiResponse, uploadAudio } from "@/lib/uploadAudio";
 
 const TRANSCRIPTION_LABELS: Record<Meeting["transcriptionStatus"], string> = {
   indisponible: "Choisissez d'abord un fichier audio",
@@ -76,18 +77,10 @@ export default function TranscriptionPanel({
     setError(null);
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("audio", file, file.name);
-      formData.append("title", file.name.replace(/\.[^.]+$/, ""));
-      const res = await fetch("/api/audio", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Échec de l'import du fichier.");
-        return;
-      }
-      selectAudio(data.file.id);
-    } catch {
-      setError("Impossible d'envoyer le fichier au serveur.");
+      const saved = await uploadAudio(file, file.name, file.name.replace(/\.[^.]+$/, ""));
+      selectAudio(saved.id);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setUploading(false);
     }
@@ -115,9 +108,11 @@ export default function TranscriptionPanel({
     onUpdate({ transcriptionStatus: "en_cours" });
     try {
       const res = await fetch("/api/transcribe", request);
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Échec du lancement de la transcription.");
+      const data = await readApiResponse<{ transcriptId: string }>(res).catch((err: Error) => {
+        setError(err.message);
+        return null;
+      });
+      if (!data) {
         onUpdate({ transcriptionStatus: previousStatus === "terminee" ? "terminee" : "en_attente_outil" });
         return;
       }

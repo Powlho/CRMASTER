@@ -6,6 +6,18 @@ import { audioFilePath, getAudioFile } from "@/lib/server/audioLibrary";
 const ASSEMBLYAI_BASE = "https://api.assemblyai.com/v2";
 
 export async function POST(req: NextRequest) {
+  try {
+    return await startTranscription(req);
+  } catch (err) {
+    console.error("Lancement de la transcription échoué :", err);
+    return NextResponse.json(
+      { error: `Échec du lancement de la transcription : ${(err as Error).message}` },
+      { status: 500 }
+    );
+  }
+}
+
+async function startTranscription(req: NextRequest) {
   const apiKey = process.env.ASSEMBLYAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

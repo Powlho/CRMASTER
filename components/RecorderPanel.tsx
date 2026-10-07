@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, MonitorUp, Square, TriangleAlert } from "lucide-react";
 import type { Meeting } from "@/lib/types";
 import { useMeetings } from "@/lib/store";
+import { uploadAudio } from "@/lib/uploadAudio";
 
 type RecorderState = "idle" | "requesting" | "recording" | "stopped" | "error";
 
@@ -150,13 +151,12 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
   async function saveToLibrary(blob: Blob) {
     setSaveState("saving");
     try {
-      const formData = new FormData();
-      formData.append("audio", blob, "enregistrement.webm");
-      formData.append("title", `Enregistrement — ${meeting.title}`);
-      const res = await fetch("/api/audio", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      updateMeeting(meeting.id, { audioId: data.file.id });
+      const file = await uploadAudio(
+        blob,
+        "enregistrement.webm",
+        `Enregistrement — ${meeting.title}`
+      );
+      updateMeeting(meeting.id, { audioId: file.id });
       setSaveState("saved");
     } catch {
       setSaveState("error");

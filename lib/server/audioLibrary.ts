@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createWriteStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import type { AudioDownloadJob, AudioFile } from "@/lib/types";
 
 // Dossier de stockage des fichiers audio sur le serveur (VPS).
@@ -93,14 +96,40 @@ async function writeMeta(file: AudioFile) {
   await fs.writeFile(metaPath(file.id), JSON.stringify(file, null, 2));
 }
 
-/** Enregistre un fichier envoyé depuis le navigateur (enregistrement ou fichier local). */
-export async function saveUploadedAudio(blob: Blob, title: string): Promise<AudioFile> {
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "avi", "m4v", "wmv", "flv", "mpg", "mpeg"]);
+
+/**
+ * Enregistre un fichier envoyé depuis le navigateur (enregistrement ou fichier local).
+ * Le flux est écrit directement sur disque (pas de chargement en mémoire), et l'audio des
+ * vidéos est extrait avec ffmpeg pour ne garder qu'un fichier léger.
+ */
+export async function saveUploadedAudio(
+  body: ReadableStream<Uint8Array>,
+  originalName: string,
+  title: string
+): Promise<AudioFile> {
   await ensureDir();
   const id = randomUUID();
-  const ext = extFromName((blob as File).name) || "webm";
-  const fileName = `${id}.${ext}`;
-  const buffer = Buffer.from(await blob.arrayBuffer());
-  await fs.writeFile(path.join(AUDIO_DIR, fileName), buffer);
+  const ext = extFromName(originalName) || "webm";
+  let fileName = `${id}.${ext}`;
+  const uploadPath = path.join(AUDIO_DIR, fileName);
+  try {
+    await pipeline(Readable.fromWeb(body as NodeReadableStream), createWriteStream(uploadPath));
+    if (VIDEO_EXTENSIONS.has(ext)) {
+      fileName = `${id}.m4a`;
+      await extractAudio(uploadPath, path.join(AUDIO_DIR, fileName));
+      await fs.rm(uploadPath, { force: true });
+    }
+  } catch (err) {
+    await fs.rm(uploadPath, { force: true });
+    await fs.rm(path.join(AUDIO_DIR, `${id}.m4a`), { force: true });
+    throw err;
+  }
+  const { size } = await fs.stat(path.join(AUDIO_DIR, fileName));
+  if (size === 0) {
+    await fs.rm(path.join(AUDIO_DIR, fileName), { force: true });
+    throw new Error("Le fichier reçu est vide.");
+  }
   const file: AudioFile = {
     id,
     title: title || "Fichier importé",
@@ -109,11 +138,39 @@ export async function saveUploadedAudio(blob: Blob, title: string): Promise<Audi
     platform: null,
     durationSec: null,
     fileName,
-    sizeBytes: buffer.length,
+    sizeBytes: size,
     createdAt: new Date().toISOString(),
   };
   await writeMeta(file);
   return file;
+}
+
+function extractAudio(input: string, output: string) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      process.env.FFMPEG_PATH || "ffmpeg",
+      ["-y", "-loglevel", "error", "-i", input, "-vn", "-ac", "1", "-c:a", "aac", "-b:a", "96k", output],
+      { stdio: ["ignore", "ignore", "pipe"] }
+    );
+    let stderr = "";
+    child.stderr.on("data", (c: Buffer) => (stderr = (stderr + c.toString()).slice(-1000)));
+    child.on("error", (err: NodeJS.ErrnoException) =>
+      reject(
+        new Error(
+          err.code === "ENOENT" ? "ffmpeg n'est pas installé sur le serveur." : err.message
+        )
+      )
+    );
+    child.on("close", (code) => {
+      if (code === 0) return resolve();
+      console.error("ffmpeg :", stderr);
+      reject(
+        new Error(
+          "impossible d'extraire l'audio de la vidéo (fichier illisible ou format non pris en charge)."
+        )
+      );
+    });
+  });
 }
 
 function extFromName(name: string | undefined) {

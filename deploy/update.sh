@@ -33,9 +33,10 @@ else
 fi
 
 NGINX_CONF=/etc/nginx/sites-available/crmaster
-if [[ -f "$NGINX_CONF" ]] && ! grep -q client_max_body_size "$NGINX_CONF"; then
-  echo "==> Nginx : autorisation des envois de fichiers audio volumineux"
-  sed -i '0,/server_name .*;/s//&\n    client_max_body_size 500M;\n    proxy_read_timeout 300s;\n    proxy_send_timeout 300s;/' "$NGINX_CONF"
+if [[ -f "$NGINX_CONF" ]] && ! grep -q "client_max_body_size 2G;" "$NGINX_CONF"; then
+  echo "==> Nginx : autorisation des envois de fichiers audio/vidéo volumineux (2 Go)"
+  sed -i '/client_max_body_size\|proxy_read_timeout\|proxy_send_timeout/d' "$NGINX_CONF"
+  sed -i '0,/server_name .*;/s//&\n    client_max_body_size 2G;\n    proxy_read_timeout 600s;\n    proxy_send_timeout 600s;/' "$NGINX_CONF"
   nginx -t && systemctl reload nginx
 fi
 
