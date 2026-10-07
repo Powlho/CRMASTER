@@ -5,7 +5,17 @@
 
 set -euo pipefail
 
+if [[ $EUID -ne 0 ]]; then
+  echo "Ce script doit être lancé en root : sudo bash deploy/update.sh" >&2
+  exit 1
+fi
+
 cd "$(dirname "$0")/.."
+
+# Évite l'erreur git « detected dubious ownership » quand le dossier appartient à un autre
+# utilisateur que celui qui lance le script.
+git config --global --get-all safe.directory | grep -qx "$PWD" ||
+  git config --global --add safe.directory "$PWD"
 
 echo "==> Récupération des derniers changements"
 git pull
