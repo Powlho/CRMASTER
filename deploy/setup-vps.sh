@@ -101,12 +101,6 @@ server {
     listen 80;
     server_name ${DOMAIN:-_};
 
-    # Enregistrements et fichiers audio importés : la limite par défaut de Nginx (1 Mo)
-    # bloquerait l'envoi de l'audio au serveur.
-    client_max_body_size 2G;
-    proxy_read_timeout 600s;
-    proxy_send_timeout 600s;
-
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -121,6 +115,7 @@ server {
 NGINX
 
 ln -sf /etc/nginx/sites-available/crmaster /etc/nginx/sites-enabled/crmaster
+bash "$APP_DIR/deploy/nginx-uploads.sh"
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
