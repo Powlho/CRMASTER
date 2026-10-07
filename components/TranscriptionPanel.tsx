@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2,
   ExternalLink,
+  FileAudio,
   Loader2,
   NotebookText,
+  Play,
   Sparkles,
+  Upload,
 } from "lucide-react";
-import type { Meeting } from "@/lib/types";
+import type { AudioFile, Meeting } from "@/lib/types";
 import { useConfigStatus } from "@/lib/useConfigStatus";
 
 const TRANSCRIPTION_LABELS: Record<Meeting["transcriptionStatus"], string> = {
-  indisponible: "Disponible après l'enregistrement",
-  en_attente_outil: "Démarre automatiquement après l'enregistrement",
+  indisponible: "Choisissez d'abord un fichier audio",
+  en_attente_outil: "Prête — cliquez sur « Lancer la transcription »",
   en_cours: "Transcription en cours…",
   terminee: "Transcription terminée",
 };
@@ -39,33 +43,88 @@ export default function TranscriptionPanel({
   const [error, setError] = useState<string | null>(null);
   const [notionError, setNotionError] = useState<string | null>(null);
   const [sendingToNotion, setSendingToNotion] = useState(false);
+  const [library, setLibrary] = useState<AudioFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function refreshLibrary() {
+    try {
+      const res = await fetch("/api/audio");
+      const data = await res.json();
+      if (res.ok) setLibrary(data.files);
+    } catch {
+      // Bibliothèque indisponible : on garde la liste actuelle.
+    }
+  }
+
+  useEffect(() => {
+    refreshLibrary();
+  }, [meeting.audioId]);
+
+  function selectAudio(audioId: string) {
+    onUpdate({
+      audioId: audioId || undefined,
+      transcriptionStatus:
+        meeting.transcriptionStatus === "indisponible" && audioId
+          ? "en_attente_outil"
+          : meeting.transcriptionStatus,
+    });
+  }
+
+  async function handleImportFile(file: File) {
+    setError(null);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", file, file.name);
+      formData.append("title", file.name.replace(/\.[^.]+$/, ""));
+      const res = await fetch("/api/audio", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Échec de l'import du fichier.");
+        return;
+      }
+      selectAudio(data.file.id);
+    } catch {
+      setError("Impossible d'envoyer le fichier au serveur.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function handleGenerateTranscription() {
     setError(null);
-    if (!audioBlob) {
-      setError(
-        "L'enregistrement audio n'est plus disponible dans cet onglet. Relancez un enregistrement pour lancer la transcription."
-      );
+    let request: RequestInit;
+    if (meeting.audioId) {
+      request = {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ audioId: meeting.audioId }),
+      };
+    } else if (audioBlob) {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "recording.webm");
+      request = { method: "POST", body: formData };
+    } else {
+      setError("Choisissez un fichier audio de la bibliothèque ou importez-en un.");
       return;
     }
 
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "recording.webm");
-
+    const previousStatus = meeting.transcriptionStatus;
     onUpdate({ transcriptionStatus: "en_cours" });
     try {
-      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+      const res = await fetch("/api/transcribe", request);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Échec du lancement de la transcription.");
-        onUpdate({ transcriptionStatus: "en_attente_outil" });
+        onUpdate({ transcriptionStatus: previousStatus === "terminee" ? "terminee" : "en_attente_outil" });
         return;
       }
       onUpdate({ assemblyTranscriptId: data.transcriptId });
     } catch {
       setError("Impossible de contacter le serveur de transcription.");
-      onUpdate({ transcriptionStatus: "en_attente_outil" });
+      onUpdate({ transcriptionStatus: previousStatus === "terminee" ? "terminee" : "en_attente_outil" });
     }
   }
 
@@ -135,16 +194,6 @@ export default function TranscriptionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting.transcriptionStatus, meeting.assemblyTranscriptId]);
 
-  // Dès que l'enregistrement est prêt et AssemblyAI configuré, on lance la transcription
-  // sans attendre un clic — c'est l'upload automatique vers le serveur.
-  useEffect(() => {
-    if (!audioBlob) return;
-    if (!config?.assemblyAI) return;
-    if (meeting.transcriptionStatus !== "en_attente_outil") return;
-    handleGenerateTranscription();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioBlob, config?.assemblyAI, meeting.transcriptionStatus]);
-
   // Dès que la transcription est prête et Notion configuré, on pousse la page automatiquement.
   useEffect(() => {
     if (meeting.transcriptionStatus !== "terminee") return;
@@ -155,14 +204,14 @@ export default function TranscriptionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting.transcriptionStatus, meeting.notionStatus, config?.notion]);
 
-  const hasRecording =
-    meeting.status !== "planifiee" && meeting.status !== "enregistrement_en_cours";
+  const hasAudio = Boolean(meeting.audioId || audioBlob);
   const isTranscribing = meeting.transcriptionStatus === "en_cours";
   const canTranscribe =
     Boolean(config?.assemblyAI) &&
-    hasRecording &&
-    meeting.transcriptionStatus !== "en_cours" &&
-    meeting.transcriptionStatus !== "terminee";
+    hasAudio &&
+    meeting.status !== "enregistrement_en_cours" &&
+    !isTranscribing;
+  const selectedInLibrary = library.some((f) => f.id === meeting.audioId);
   const canSendToNotion =
     Boolean(config?.notion) &&
     meeting.transcriptionStatus === "terminee" &&
@@ -177,10 +226,73 @@ export default function TranscriptionPanel({
         <h2 className="text-base font-semibold text-slate-900">Transcription &amp; Notion</h2>
       </div>
       <p className="mb-5 text-sm text-slate-500">
-        Automatique via AssemblyAI, puis envoi vers votre base Notion — sans action requise.
+        Choisissez l&apos;audio à transcrire, lancez la transcription (AssemblyAI) ; le compte
+        rendu est ensuite envoyé vers votre base Notion.
       </p>
 
       <div className="space-y-4">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <FileAudio size={16} className="text-slate-400" />
+            <p className="text-sm font-medium text-slate-800">Fichier audio</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={meeting.audioId ?? ""}
+              onChange={(e) => selectAudio(e.target.value)}
+              disabled={isTranscribing}
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            >
+              <option value="">
+                {audioBlob ? "Enregistrement de cet onglet" : "— Choisir dans la bibliothèque —"}
+              </option>
+              {meeting.audioId && !selectedInLibrary && (
+                <option value={meeting.audioId}>Fichier introuvable dans la bibliothèque</option>
+              )}
+              {library.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isTranscribing}
+              className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+            >
+              {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              {uploading ? "Import…" : "Importer un fichier"}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,video/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImportFile(file);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          {meeting.audioId && selectedInLibrary && (
+            <audio
+              controls
+              preload="none"
+              src={`/api/audio/${meeting.audioId}/file`}
+              className="mt-3 w-full"
+            />
+          )}
+          <p className="mt-2 text-xs text-slate-400">
+            Les audios de vidéos (YouTube…) se récupèrent depuis la page{" "}
+            <Link href="/audio" className="text-brand-600 hover:underline">
+              Bibliothèque audio
+            </Link>
+            .
+          </p>
+        </div>
+
         <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -190,7 +302,7 @@ export default function TranscriptionPanel({
                 <CheckCircle2 size={16} className="text-emerald-500" />
               ) : null}
               <div>
-                <p className="text-sm font-medium text-slate-800">Transcription automatique</p>
+                <p className="text-sm font-medium text-slate-800">Transcription</p>
                 <p className="text-xs text-slate-500">
                   {TRANSCRIPTION_LABELS[meeting.transcriptionStatus]}
                 </p>
@@ -202,15 +314,18 @@ export default function TranscriptionPanel({
               title={
                 !config?.assemblyAI
                   ? "Configurez ASSEMBLYAI_API_KEY côté serveur"
-                  : undefined
+                  : !hasAudio
+                    ? "Choisissez d'abord un fichier audio"
+                    : undefined
               }
-              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
                 canTranscribe
                   ? "bg-brand-500 text-white hover:bg-brand-600"
                   : "cursor-not-allowed bg-slate-200 text-slate-500"
               }`}
             >
-              {meeting.transcriptionStatus === "terminee" ? "Relancer" : "Générer la transcription"}
+              <Play size={12} fill="currentColor" />
+              {meeting.transcriptionStatus === "terminee" ? "Relancer" : "Lancer la transcription"}
             </button>
           </div>
           {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -268,11 +383,6 @@ export default function TranscriptionPanel({
         </div>
       </div>
 
-      {!hasRecording && (
-        <p className="mt-4 text-xs text-slate-400">
-          Terminez d&apos;abord l&apos;enregistrement de cette réunion.
-        </p>
-      )}
     </div>
   );
 }

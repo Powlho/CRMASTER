@@ -29,6 +29,7 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
   const [error, setError] = useState<string | null>(null);
   const [micOnlyWarning, setMicOnlyWarning] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -125,6 +126,7 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
         setAudioUrl(url);
         cleanupMedia();
         onRecordingComplete?.(blob);
+        saveToLibrary(blob);
       };
 
       mediaRecorderRef.current = recorder;
@@ -140,6 +142,24 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
       setError(
         err instanceof Error ? err.message : "Impossible de démarrer l'enregistrement."
       );
+    }
+  }
+
+  // Sauvegarde l'enregistrement sur le serveur, dans la bibliothèque audio : il reste
+  // disponible pour la transcription même si l'onglet est fermé.
+  async function saveToLibrary(blob: Blob) {
+    setSaveState("saving");
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "enregistrement.webm");
+      formData.append("title", `Enregistrement — ${meeting.title}`);
+      const res = await fetch("/api/audio", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      updateMeeting(meeting.id, { audioId: data.file.id });
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
     }
   }
 
@@ -227,8 +247,11 @@ export default function RecorderPanel({ meeting, onRecordingComplete }: Recorder
         </audio>
       )}
       <p className="text-xs text-slate-400">
-        L&apos;audio est envoyé automatiquement à votre serveur pour être transcrit puis
-        poussé vers Notion.
+        {saveState === "saving" && "Sauvegarde de l'audio sur le serveur…"}
+        {saveState === "saved" &&
+          "Audio sauvegardé dans la bibliothèque du serveur. Lancez la transcription ci-dessous quand vous le souhaitez."}
+        {saveState === "error" &&
+          "La sauvegarde sur le serveur a échoué : l'audio reste disponible dans cet onglet uniquement, vous pouvez quand même lancer la transcription."}
       </p>
     </div>
   );

@@ -40,7 +40,13 @@ apt-get update -y
 apt-get upgrade -y
 
 echo "==> Installation des paquets de base"
-apt-get install -y curl git ufw fail2ban nginx
+apt-get install -y curl git ufw fail2ban nginx ffmpeg
+
+echo "==> Installation de yt-dlp (téléchargement de l'audio des vidéos)"
+# Binaire officiel autonome depuis GitHub : la version des dépôts Ubuntu est trop ancienne
+# pour suivre les changements de YouTube.
+curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp
+chmod a+rx /usr/local/bin/yt-dlp
 
 echo "==> Installation de Node.js 20 LTS"
 if ! command -v node >/dev/null || [[ "$(node -v)" != v20* ]]; then
@@ -94,6 +100,12 @@ cat > /etc/nginx/sites-available/crmaster <<NGINX
 server {
     listen 80;
     server_name ${DOMAIN:-_};
+
+    # Enregistrements et fichiers audio importés : la limite par défaut de Nginx (1 Mo)
+    # bloquerait l'envoi de l'audio au serveur.
+    client_max_body_size 500M;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

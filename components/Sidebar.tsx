@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarClock, Plus, Settings, Video } from "lucide-react";
+import { AudioLines, CalendarClock, Plus, Settings, Video } from "lucide-react";
 
 const links = [
   { href: "/", label: "Réunions", icon: CalendarClock },
   { href: "/reunions/nouvelle", label: "Nouvelle réunion", icon: Plus },
+  { href: "/audio", label: "Bibliothèque audio", icon: AudioLines },
   { href: "/parametres", label: "Paramètres", icon: Settings },
 ];
 

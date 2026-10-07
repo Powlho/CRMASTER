@@ -1,14 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MonitorUp, Users } from "lucide-react";
 import { useMeetings } from "@/lib/store";
-import type { MeetingType } from "@/lib/types";
+import type { AudioFile, MeetingType } from "@/lib/types";
 
-export default function NewMeetingPage() {
+export default function NewMeetingPage({
+  searchParams,
+}: {
+  searchParams: { audio?: string };
+}) {
   const router = useRouter();
-  const { createMeeting } = useMeetings();
+  const { createMeeting, updateMeeting } = useMeetings();
+  // Création depuis la bibliothèque audio : la réunion est rattachée à ce fichier.
+  const audioId = searchParams.audio;
+  const [audioFile, setAudioFile] = useState<AudioFile | null>(null);
 
   const [title, setTitle] = useState("");
   const [type, setType] = useState<MeetingType>("visio");
@@ -17,10 +24,30 @@ export default function NewMeetingPage() {
   const [participants, setParticipants] = useState("");
   const [notes, setNotes] = useState("");
 
+  useEffect(() => {
+    if (!audioId) return;
+    fetch(`/api/audio/${audioId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { file: AudioFile } | null) => {
+        if (!data) return;
+        setAudioFile(data.file);
+        setTitle((t) => t || data.file.title);
+      })
+      .catch(() => {});
+  }, [audioId]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
     const meeting = createMeeting({ title, type, date, time, participants, notes });
+    if (audioFile) {
+      updateMeeting(meeting.id, {
+        audioId: audioFile.id,
+        status: "enregistree",
+        recordingDurationSec: audioFile.durationSec,
+        transcriptionStatus: "en_attente_outil",
+      });
+    }
     router.push(`/reunions/${meeting.id}`);
   }
 
@@ -31,6 +58,13 @@ export default function NewMeetingPage() {
         Renseignez les informations de la réunion. Vous pourrez lancer l&apos;enregistrement
         depuis sa page dédiée.
       </p>
+
+      {audioFile && (
+        <p className="mb-6 rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-700">
+          Compte rendu à partir du fichier audio <strong>{audioFile.title}</strong> — vous
+          pourrez lancer la transcription depuis la page de la réunion.
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>

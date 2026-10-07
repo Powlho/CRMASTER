@@ -6,3 +6,7 @@ out
 .env
 .env.local
 .env*.local
+
+# Fichiers audio stockés sur le serveur
+data
+*.tsbuildinfo

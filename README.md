@@ -9,6 +9,35 @@ Copiez `.env.example` en `.env.local` et renseignez :
 
 Détails pas à pas dans la page **Paramètres** de l'application.
 
+## Transcription
+
+La transcription se lance **manuellement** depuis la page d'une réunion (bouton « Lancer la
+transcription »), à partir d'un fichier audio au choix :
+
+- l'enregistrement fait dans le navigateur (sauvegardé automatiquement sur le serveur à l'arrêt) ;
+- un fichier de la **Bibliothèque audio** ;
+- un fichier importé depuis votre ordinateur.
+
+Le compte rendu est ensuite envoyé vers Notion.
+
+## Bibliothèque audio (YouTube et autres plateformes)
+
+La page **Bibliothèque audio** (barre latérale) récupère la piste audio d'une vidéo à partir de son
+lien (YouTube, Vimeo, Dailymotion, Twitch, X, LinkedIn… — tous les sites gérés par
+[yt-dlp](https://github.com/yt-dlp/yt-dlp)). Les fichiers sont stockés sur le serveur
+(`data/audio/` par défaut, ou `AUDIO_STORAGE_DIR`), écoutables et téléchargeables depuis l'app, et
+le bouton « Compte rendu » crée une réunion prête à être transcrite.
+
+Prérequis serveur : `yt-dlp` et `ffmpeg` (installés automatiquement par `deploy/setup-vps.sh` et
+`deploy/update.sh`). En local : `pip install yt-dlp` (ou `brew install yt-dlp ffmpeg`).
+
+Si YouTube refuse le téléchargement depuis le VPS (« Sign in to confirm you're not a bot »),
+exportez les cookies de votre navigateur au format Netscape (extension « Get cookies.txt
+LOCALLY ») vers un fichier sur le serveur et renseignez `YTDLP_COOKIES_FILE`.
+
+Cette fonctionnalité nécessite un VPS : sur le plan gratuit de Render, yt-dlp n'est pas installé et
+le disque n'est pas persistant.
+
 ## Développement
 
 ```bash

@@ -28,6 +28,8 @@ export interface Meeting {
   notionStatus: NotionStatus;
   recordingDurationSec: number | null;
   createdAt: string;
+  /** Fichier de la bibliothèque audio (stocké sur le serveur) utilisé pour la transcription. */
+  audioId?: string;
   assemblyTranscriptId?: string;
   transcriptText?: string;
   transcriptSummary?: string;
@@ -38,3 +40,26 @@ export type NewMeetingInput = Pick<
   Meeting,
   "title" | "type" | "date" | "time" | "participants" | "notes"
 >;
+
+export interface AudioFile {
+  id: string;
+  title: string;
+  source: "download" | "upload";
+  sourceUrl: string | null;
+  platform: string | null;
+  durationSec: number | null;
+  fileName: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface AudioDownloadJob {
+  id: string;
+  url: string;
+  status: "running" | "done" | "error";
+  progress: number;
+  title: string | null;
+  error: string | null;
+  audioId: string | null;
+  startedAt: string;
+}
